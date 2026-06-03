@@ -1,50 +1,60 @@
-# CMake / C++ 构建产物
+# =============================================================================
+# tj_control — 按本仓库目录结构编写（CMake + mv_control + TJ_SDK + tools）
+# =============================================================================
+
+# --- CMake 构建目录（根 build/、TJ_SDK/DEMO_C++/build/、third_part/ruckig_part/build/）---
+# 产物：libmv_control.a、examples/test_movJ、demo_ik、example_position_offline
 build/
 cmake-build-*/
-CMakeCache.txt
-CMakeFiles/
-cmake_install.cmake
-Makefile
-*.o
-*.a
-*.so
-*.dll
-*.exe
-*.out
-*.d
 
-# IDE / 编辑器
+# --- mv_control 本地配置（勿提交内网 IP / 工位参数覆盖）---
+mv_control/config/*.local.yaml
+mv_control/config/*.local.yml
+
+# --- tools/ MIMO 代理与 cloudflared（由 install_cloudflared.sh 下载安装）---
+tools/cloudflared
+tools/cloudflared.deb
+tools/__pycache__/
+
+# --- Cursor / 敏感凭据 ---
+.cursor/
+api.txt
+.env
+.env.*
+
+# --- Python（plot/、TJ_SDK DEMO_PYTHON）---
+__pycache__/
+*.py[cod]
+.Python
+.venv/
+venv/
+env/
+
+# --- TJ_SDK 临时/调试文件（对齐 TJ_SDK/TJ_FX_ROBOT_CONTRL_SDK/.gitignore）---
+test.txt
+testkj.txt
+debug/
+my_folder/
+TJ_SDK/TJ_FX_ROBOT_CONTRL_SDK/kinematicsSDK/test.txt
+TJ_SDK/TJ_FX_ROBOT_CONTRL_SDK/kinematicsSDK/testkj.txt
+TJ_SDK/TJ_FX_ROBOT_CONTRL_SDK/DEMO_PYTHON/test.txt
+TJ_SDK/TJ_FX_ROBOT_CONTRL_SDK/DEMO_PYTHON/testkj.txt
+
+# --- 嵌套 Git 元数据（避免子模块空引用）---
+**/.git/
+
+# --- IDE / 编辑器（SDK .editorconfig 已约定 4 空格，此处仅忽略本地配置）---
 .vs/
 .idea/
 .vscode/
 *.swp
 *~
 
-# Python
-__pycache__/
-*.pyc
-*.pyo
-.Python
-.venv/
-venv/
-env/
-
-# 敏感配置（含 API Key）
-.cursor/mimo.config.json
-.cursor/mimo-agent/
-api.txt
-.env
-.env.*
-
-# 嵌套 Git 元数据（避免子模块空引用）
-**/.git/
-
-# SDK / 工具临时文件
-test.txt
-testkj.txt
-debug/
-my_folder/
-
-# 系统文件
+# --- 系统杂项 ---
 .DS_Store
 Thumbs.db
+
+# --- 明确保留入库（勿向下列路径添加忽略规则）---
+# TJ_SDK/*.so,*.dll     → mv_control/CMakeLists.txt find_library
+# data/*/*.csv          → examples/test_movJ.cpp 输出、python/plot/test_movJ.py 输入
+# TJ_SDK/*.MvKDCfg,*.fmv,*.ini → SDK 运动学/轨迹 Demo
