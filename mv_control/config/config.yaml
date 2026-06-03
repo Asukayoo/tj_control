@@ -1,0 +1,46 @@
+# mv_control 运行配置
+# 关节角 home_q / work_q 单位：度（与 Marvin SDK 一致）
+# 关节限制单位：rad/s, rad/s², rad/s³（见 common.hpp JointLimit）
+# 笛卡尔限制：线速度 mm/s；角速度 rad/s
+
+connect:
+  # 控制器 IP，对应 OnLinkTo(ip1, ip2, ip3, ip4)
+  ip: [192, 168, 1, 190]
+  log_switch: 0
+
+# SDK 运动学配置文件（*.MvKDCfg，见下文说明）
+# 相对本文件路径，或填写绝对路径
+sdk:
+  kine_cfg: "../../TJ_SDK/TJ_FX_ROBOT_CONTRL_SDK/DEMO_C++/srs.MvKDCfg"
+
+left:
+  arm_serial: 0
+  home_q: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  work_q: [21.8, -41.0, -4.74, -63.67, 10.15, 14.72, 7.68]
+  joint_limit:
+    max_v: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    max_a: [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0]
+    max_j: [30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0]
+  cart_limit:
+    max_line_v: 200.0
+    max_line_a: 1000.0
+    max_line_j: 5000.0
+    max_angle_v: 1.0
+    max_angle_a: 3.0
+    max_angle_j: 30.0
+
+right:
+  arm_serial: 1
+  home_q: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+  work_q: [-21.8, -41.0, 4.75, -63.67, -10.15, 14.72, -7.68]
+  joint_limit:
+    max_v: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+    max_a: [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0]
+    max_j: [30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0]
+  cart_limit:
+    max_line_v: 200.0
+    max_line_a: 1000.0
+    max_line_j: 5000.0
+    max_angle_v: 1.0
+    max_angle_a: 3.0
+    max_angle_j: 30.0

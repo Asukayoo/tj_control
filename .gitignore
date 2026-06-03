@@ -1,0 +1,50 @@
+# CMake / C++ 构建产物
+build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.o
+*.a
+*.so
+*.dll
+*.exe
+*.out
+*.d
+
+# IDE / 编辑器
+.vs/
+.idea/
+.vscode/
+*.swp
+*~
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.Python
+.venv/
+venv/
+env/
+
+# 敏感配置（含 API Key）
+.cursor/mimo.config.json
+.cursor/mimo-agent/
+api.txt
+.env
+.env.*
+
+# 嵌套 Git 元数据（避免子模块空引用）
+**/.git/
+
+# SDK / 工具临时文件
+test.txt
+testkj.txt
+debug/
+my_folder/
+
+# 系统文件
+.DS_Store
+Thumbs.db

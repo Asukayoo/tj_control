@@ -1,0 +1,16 @@
+
+.vs/
+.idea/
+.vscode/
+*.pyc
+__pycache__/
+*.so
+*.dll
+kinematicsSDK/test.txt
+kinematicsSDK/testkj.txt
+test.txt
+testkj.txt
+DEMO_PYTHON/test.txt
+DEMO_PYTHON/testkj.txt
+debug/
+my_folder/
