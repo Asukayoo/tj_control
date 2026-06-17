@@ -1,0 +1,1 @@
+# test_enable 1kHz: enable → mode → run×10 → disable

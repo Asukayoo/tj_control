@@ -1,46 +1,74 @@
 # mv_control 运行配置
 # 关节角 home_q / work_q 单位：度（与 Marvin SDK 一致）
-# 关节限制单位：rad/s, rad/s², rad/s³（见 common.hpp JointLimit）
-# 笛卡尔限制：线速度 mm/s；角速度 rad/s
+# cart_state / MovL / ServoP：Link_Base 系（KDL FK/IK 直接输出）
+# 关节限制：max_v/max_a/max_j 单位 deg/s、deg/s²、deg/s³（内部转为 rad）
+# 笛卡尔限制：线速度 mm/s；角速度 deg/s、deg/s²、deg/s³（内部转为 rad）
+# Servo：内部 40 周期三次样条 + 10 点滑动平均；外部调用频率由应用层决定（如 test_servo 50Hz）
+
+servo:
+  servoj:
+    p_gain: 500.0
+    d_gain: 50.0
+  servop:
+    p_gain: 200.0
+    d_gain: 50.0
 
 connect:
-  # 控制器 IP，对应 OnLinkTo(ip1, ip2, ip3, ip4)
+  # 控制器 IP，对应 Connect(ip1, ip2, ip3, ip4)
   ip: [192, 168, 1, 190]
   log_switch: 0
+  vel_ratio: 100
+  acc_ratio: 100
+  mode_transition_timeout_ms: 1000   # 1kHz 下 1000 ts；SDK 101~109 或模式不同步超时 → ModeError
+  strict_init_state: true
+  servo_err_poll_cycles: 0      # Run 内不轮询；伺服故障靠 OnGetBuf 的 m_ERRCode==2
 
-# SDK 运动学配置文件（*.MvKDCfg，见下文说明）
+# 阻抗/力控参数（SetControlMode 非 Position 时使用）
+imp:
+  joint:
+    K: [100, 100, 100, 100, 50, 50, 50]
+    D: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+  cart:
+    K: [500, 500, 500, 50, 50, 50, 50]
+    D: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+    rot_type: 2
+  force:
+    fx_dir: [0, 0, 1, 0, 0, 0]
+    fc_adj_lmt: 10.0
+
+# URDF 模型文件（基座 Link_Base，末端 TCP_Link_L / TCP_Link_R）
 # 相对本文件路径，或填写绝对路径
 sdk:
-  kine_cfg: "../../TJ_SDK/TJ_FX_ROBOT_CONTRL_SDK/DEMO_C++/srs.MvKDCfg"
+  urdf: "/home/yxc/tj_control/urdf/Marvin_M6S_CCS_696_ urdf/urdf/Marvin M6-S-CCS-696-V4.0_Base_and_Stand_Asm urdf.urdf"
 
 left:
   arm_serial: 0
-  home_q: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-  work_q: [21.8, -41.0, -4.74, -63.67, 10.15, 14.72, 7.68]
+  home_q: [90, -90, -90, 0, 0, 0, 0]
+  work_q: [90, -60, -90, -90, 0, 0, 0]
   joint_limit:
-    max_v: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-    max_a: [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0]
-    max_j: [30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0]
+    max_v: [30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0]
+    max_a: [60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0]
+    max_j: [180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0]
   cart_limit:
-    max_line_v: 200.0
-    max_line_a: 1000.0
-    max_line_j: 5000.0
-    max_angle_v: 1.0
-    max_angle_a: 3.0
-    max_angle_j: 30.0
+    max_line_v: 300.0
+    max_line_a: 600.0
+    max_line_j: 3000.0
+    max_angle_v: 57.3
+    max_angle_a: 114.6
+    max_angle_j: 573.0
 
 right:
   arm_serial: 1
-  home_q: [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-  work_q: [-21.8, -41.0, 4.75, -63.67, -10.15, 14.72, -7.68]
+  home_q: [-90, -90, 90,   0, 0, 0, 0]
+  work_q: [-90, -60, 90, -90, 0, 0, 0]
   joint_limit:
-    max_v: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
-    max_a: [3.0, 3.0, 3.0, 3.0, 3.0, 3.0, 3.0]
-    max_j: [30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0]
+    max_v: [30.0, 30.0, 30.0, 30.0, 30.0, 30.0, 30.0]
+    max_a: [60.0, 60.0, 60.0, 60.0, 60.0, 60.0, 60.0]
+    max_j: [180.0, 180.0, 180.0, 180.0, 180.0, 180.0, 180.0]
   cart_limit:
-    max_line_v: 200.0
-    max_line_a: 1000.0
-    max_line_j: 5000.0
-    max_angle_v: 1.0
-    max_angle_a: 3.0
-    max_angle_j: 30.0
+    max_line_v: 300.0
+    max_line_a: 600.0
+    max_line_j: 3000.0
+    max_angle_v: 57.3
+    max_angle_a: 114.6
+    max_angle_j: 573.0

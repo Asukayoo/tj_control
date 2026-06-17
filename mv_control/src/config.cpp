@@ -11,7 +11,7 @@ V7d ParseV7Deg(const YAML::Node& node) {
         return v;
     }
     for (int i = 0; i < DOF; ++i) {
-        v(i) = node[i].as<double>() * D2R;  // yaml 中 home/work 为度
+        v(i) = node[i].as<double>() * D2R;
     }
     return v;
 }
@@ -30,13 +30,13 @@ V7d ParseV7(const YAML::Node& node) {
 JointLimit ParseJointLimit(const YAML::Node& node) {
     JointLimit lim;
     if (node["max_v"]) {
-        lim.max_v = ParseV7(node["max_v"]);
+        lim.max_v = ParseV7Deg(node["max_v"]);
     }
     if (node["max_a"]) {
-        lim.max_a = ParseV7(node["max_a"]);
+        lim.max_a = ParseV7Deg(node["max_a"]);
     }
     if (node["max_j"]) {
-        lim.max_j = ParseV7(node["max_j"]);
+        lim.max_j = ParseV7Deg(node["max_j"]);
     }
     return lim;
 }
@@ -52,14 +52,15 @@ CartLimit ParseCartLimit(const YAML::Node& node) {
     if (node["max_line_j"]) {
         lim.max_line_j = node["max_line_j"].as<double>();
     }
+    // YAML 单位 deg/s、deg/s²、deg/s³；内部 rad（与 joint_limit 一致）
     if (node["max_angle_v"]) {
-        lim.max_angle_v = node["max_angle_v"].as<double>();
+        lim.max_angle_v = node["max_angle_v"].as<double>() * D2R;
     }
     if (node["max_angle_a"]) {
-        lim.max_angle_a = node["max_angle_a"].as<double>();
+        lim.max_angle_a = node["max_angle_a"].as<double>() * D2R;
     }
     if (node["max_angle_j"]) {
-        lim.max_angle_j = node["max_angle_j"].as<double>();
+        lim.max_angle_j = node["max_angle_j"].as<double>() * D2R;
     }
     return lim;
 }
@@ -82,38 +83,123 @@ void ParseArm(const YAML::Node& node, ArmConfig& arm) {
     }
 }
 
+ServoPdGain ParseServoPd(const YAML::Node& node, const ServoPdGain& fallback) {
+    ServoPdGain g = fallback;
+    if (node["p_gain"]) {
+        g.p_gain = node["p_gain"].as<double>();
+    }
+    if (node["d_gain"]) {
+        g.d_gain = node["d_gain"].as<double>();
+    }
+    return g;
+}
+
+void ParseServo(const YAML::Node& node, ServoConfig& servo) {
+    if (node["servoj"]) {
+        servo.servoj = ParseServoPd(node["servoj"], servo.servoj);
+    }
+    if (node["servop"]) {
+        servo.servop = ParseServoPd(node["servop"], servo.servop);
+    }
+}
+
+void ParseConnect(const YAML::Node& node, ConnectConfig& connect) {
+    if (node["ip"] && node["ip"].IsSequence() && node["ip"].size() >= 4) {
+        for (int i = 0; i < 4; ++i) {
+            connect.ip[i] = static_cast<uint8_t>(node["ip"][i].as<int>());
+        }
+    }
+    if (node["log_switch"]) {
+        connect.log_switch = node["log_switch"].as<int>();
+    }
+    if (node["vel_ratio"]) {
+        connect.vel_ratio = node["vel_ratio"].as<int>();
+    }
+    if (node["acc_ratio"]) {
+        connect.acc_ratio = node["acc_ratio"].as<int>();
+    }
+    if (node["mode_transition_timeout_ms"]) {
+        connect.mode_transition_timeout_ms =
+            node["mode_transition_timeout_ms"].as<int>();
+    }
+    if (node["strict_init_state"]) {
+        connect.strict_init_state = node["strict_init_state"].as<bool>();
+    }
+    if (node["servo_err_poll_cycles"]) {
+        connect.servo_err_poll_cycles = node["servo_err_poll_cycles"].as<int>();
+    }
+}
+
+void ParseImp(const YAML::Node& node, ImpConfig& imp) {
+    if (node["joint"]) {
+        const YAML::Node j = node["joint"];
+        if (j["K"]) {
+            imp.joint.K = ParseV7(j["K"]);
+        }
+        if (j["D"]) {
+            imp.joint.D = ParseV7(j["D"]);
+        }
+    }
+    if (node["cart"]) {
+        const YAML::Node c = node["cart"];
+        if (c["K"]) {
+            imp.cart.K = ParseV7(c["K"]);
+        }
+        if (c["D"]) {
+            imp.cart.D = ParseV7(c["D"]);
+        }
+        if (c["rot_type"]) {
+            imp.cart.rot_type = c["rot_type"].as<int>();
+        }
+        if (c["cart_ctrl_para"] && c["cart_ctrl_para"].IsSequence()) {
+            for (size_t i = 0; i < imp.cart.cart_ctrl_para.size() &&
+                               i < c["cart_ctrl_para"].size();
+                 ++i) {
+                imp.cart.cart_ctrl_para[i] = c["cart_ctrl_para"][i].as<double>();
+            }
+        }
+    }
+    if (node["force"]) {
+        const YAML::Node f = node["force"];
+        if (f["fx_dir"] && f["fx_dir"].IsSequence() && f["fx_dir"].size() >= 6) {
+            for (int i = 0; i < 6; ++i) {
+                imp.force.fx_dir(i) = f["fx_dir"][i].as<double>();
+            }
+        }
+        if (f["fc_adj_lmt"]) {
+            imp.force.fc_adj_lmt = f["fc_adj_lmt"].as<double>();
+        }
+    }
+}
+
 }  // namespace
 
 bool LoadMvConfig(const char* yaml_path, MvConfig& out) {
     try {
-        {
-            const YAML::Node root = YAML::LoadFile(yaml_path);
-            if (root["connect"]) {
-                const auto& c = root["connect"];
-                if (c["ip"] && c["ip"].IsSequence() && c["ip"].size() >= 4) {
-                    for (int i = 0; i < 4; ++i) {
-                        out.connect_ip[i] = static_cast<uint8_t>(c["ip"][i].as<int>());
-                    }
-                }
-                if (c["log_switch"]) {
-                    out.log_switch = c["log_switch"].as<int>();
-                }
+        const YAML::Node root = YAML::LoadFile(yaml_path);
+        if (root["connect"]) {
+            ParseConnect(root["connect"], out.connect);
+        }
+        if (root["sdk"] && root["sdk"]["urdf"]) {
+            out.urdf_path = root["sdk"]["urdf"].as<std::string>();
+            const std::filesystem::path base =
+                std::filesystem::path(yaml_path).parent_path();
+            const std::filesystem::path resolved = base / out.urdf_path;
+            if (std::filesystem::exists(resolved)) {
+                out.urdf_path = resolved.string();
             }
-            if (root["sdk"] && root["sdk"]["kine_cfg"]) {
-                out.kine_cfg_path = root["sdk"]["kine_cfg"].as<std::string>();
-                const std::filesystem::path base =
-                    std::filesystem::path(yaml_path).parent_path();
-                const std::filesystem::path resolved = base / out.kine_cfg_path;
-                if (std::filesystem::exists(resolved)) {
-                    out.kine_cfg_path = resolved.string();
-                }
-            }
-            if (root["left"]) {
-                ParseArm(root["left"], out.left);
-            }
-            if (root["right"]) {
-                ParseArm(root["right"], out.right);
-            }
+        }
+        if (root["servo"]) {
+            ParseServo(root["servo"], out.servo);
+        }
+        if (root["imp"]) {
+            ParseImp(root["imp"], out.imp);
+        }
+        if (root["left"]) {
+            ParseArm(root["left"], out.left);
+        }
+        if (root["right"]) {
+            ParseArm(root["right"], out.right);
         }
         return true;
     } catch (const YAML::Exception&) {

@@ -1,8 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
 
-# SIM 模式：默认开启，不连接真实硬件，反馈 resp 跟随 ref
-option(MV_CONTROL_SIM "Simulate hardware; resp tracks ref without Marvin control link" ON)
-
 set(MV_CONTROL_SDK_ROOT "${CMAKE_SOURCE_DIR}/TJ_SDK/TJ_FX_ROBOT_CONTRL_SDK" CACHE PATH
     "Marvin SDK root")
 
@@ -10,17 +7,19 @@ add_library(mv_control STATIC
   src/mv_control.cpp
   src/robot.cpp
   src/config.cpp
+  src/hw_interface.cpp
   src/internal/ik.cpp
   src/internal/motion.cpp
+  src/internal/sdk_map.cpp
+  src/internal/diag.cpp
 )
 
 target_include_directories(mv_control
   PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${MV_CONTROL_SDK_ROOT}/contrlSDK
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${MV_CONTROL_SDK_ROOT}/kinematicsSDK
+    ${MV_CONTROL_SDK_ROOT}/contrlSDK
 )
 
 target_link_libraries(mv_control
@@ -34,25 +33,48 @@ find_library(MARVIN_SDK MarvinSDK
     ${MV_CONTROL_SDK_ROOT}/DEMO_C++
   NO_DEFAULT_PATH
 )
-find_library(KINE_SDK Kine
-  PATHS
-    ${MV_CONTROL_SDK_ROOT}/kinematicsSDK
-    ${MV_CONTROL_SDK_ROOT}/DEMO_C++
-  NO_DEFAULT_PATH
+
+# KDL + kdl_parser（URDF 运动学）
+list(APPEND CMAKE_PREFIX_PATH "/opt/ros/humble")
+find_package(orocos_kdl REQUIRED)
+find_package(kdl_parser REQUIRED)
+
+# setcap 后 LD_LIBRARY_PATH 无效；须把 URDF/plugin 链作为直接依赖预载入
+set(_MV_ROS_RUNTIME_LIBS
+  urdf
+  urdf_xml_parser
+  urdfdom_model
+  urdfdom_world
+  urdfdom_sensor
+  class_loader
+  console_bridge
+  tinyxml2
+  ament_index_cpp
+  rcpputils
+  rcutils
+)
+set(MV_ROS_RUNTIME_LIBS "")
+foreach(_lib IN LISTS _MV_ROS_RUNTIME_LIBS)
+  find_library(_MV_ROS_LIB_${_lib} ${_lib} PATHS ${TJ_RUNTIME_LIB_DIRS} NO_DEFAULT_PATH)
+  if(_MV_ROS_LIB_${_lib})
+    list(APPEND MV_ROS_RUNTIME_LIBS ${_MV_ROS_LIB_${_lib}})
+  else()
+    message(FATAL_ERROR "mv_control: required runtime lib ${_lib} not found in ${TJ_RUNTIME_LIB_DIRS}")
+  endif()
+endforeach()
+
+message(STATUS "mv_control: ROS runtime libs linked: ${MV_ROS_RUNTIME_LIBS}")
+
+target_link_libraries(mv_control PUBLIC
+  orocos-kdl
+  kdl_parser::kdl_parser
+  ${MV_ROS_RUNTIME_LIBS}
 )
 
-if(KINE_SDK)
-  target_link_libraries(mv_control PRIVATE ${KINE_SDK})
+if(MARVIN_SDK)
+  target_link_libraries(mv_control PRIVATE ${MARVIN_SDK})
 else()
-  message(WARNING "Kine SDK not found; mv_control FK/IK unavailable")
-endif()
-
-if(NOT MV_CONTROL_SIM)
-  if(MARVIN_SDK)
-    target_link_libraries(mv_control PRIVATE ${MARVIN_SDK})
-  else()
-    message(FATAL_ERROR "MarvinSDK not found; disable MV_CONTROL_SIM or install control SDK")
-  endif()
+  message(FATAL_ERROR "MarvinSDK not found; install control SDK")
 endif()
 
 find_package(yaml-cpp REQUIRED)
@@ -65,10 +87,7 @@ else()
   target_include_directories(mv_control PUBLIC /usr/include/eigen3)
 endif()
 
+target_compile_definitions(mv_control PUBLIC
+    MV_CONTROL_CONFIG_DEFAULT="${CMAKE_SOURCE_DIR}/mv_control/config/config.yaml")
 target_compile_definitions(mv_control PRIVATE CMPL_LIN EIGEN_MAX_STATIC_ALIGN_BYTES=0)
-if(MV_CONTROL_SIM)
-  target_compile_definitions(mv_control PRIVATE MV_CONTROL_SIM)
-  message(STATUS "mv_control: SIM mode (no hardware link)")
-else()
-  message(STATUS "mv_control: hardware mode")
-endif()
+message(STATUS "mv_control: runtime SIM/HW via Init(is_sim)")

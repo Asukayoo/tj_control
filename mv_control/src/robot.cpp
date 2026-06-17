@@ -1,39 +1,31 @@
-#include "mv_control.hpp"
+#include "robot.hpp"
 
+#include "internal/diag.hpp"
+#include "internal/robot_impl.hpp"
+#include "internal/sdk_map.hpp"
 #include "internal/ik.hpp"
+
+#include <cmath>
+#include <cstdio>
 
 namespace {
 
-constexpr int kLeftArmIdx = 0;
-constexpr int kRightArmIdx = 1;
-
-void V7dToArray(const V7d& q, double joints[DOF]) {
-    for (int i = 0; i < DOF; ++i) {
-        joints[i] = q(i);
-    }
-}
-
-void ApplyDiffToRef(RobotState& ref, const JointState& js) {
-    const V7d dq = js.q - ref.joint_state.q;
-    const V7d dv = js.v - ref.joint_state.v;
-    const V7d da = js.a - ref.joint_state.a;
-    ref.joint_state.j = (da) / kControlDt;
-    ref.joint_state.a = dv / kControlDt;
-    ref.joint_state.v = dq / kControlDt;
-    ref.joint_state.q = js.q;
-}
-
-void UpdateRefCart(int arm_serial, RobotState& ref) {
-    // 运动学未初始化时跳过，避免 SDK 未定义行为破坏堆
+bool UpdateCartFromJoint(int arm_serial, RobotState& rs) {
     if (!IkSolver::IsReady()) {
-        return;
+        return false;
     }
-    if (!IkSolver::Forward(arm_serial, ref.joint_state.q, ref.cart_state.pose)) {
-        return;
+    if (!IkSolver::Forward(arm_serial, rs.joint_state.q, rs.cart_state.pose)) {
+        return false;
     }
-    if (IkSolver::Jacobian(arm_serial, ref.joint_state.q, ref.cart_state.jacob)) {
-        ref.cart_state.vel = ref.cart_state.jacob * ref.joint_state.v;
+    Jacob j_arm;
+    if (IkSolver::Jacobian(arm_serial, rs.joint_state.q, j_arm)) {
+        rs.cart_state.jacob = j_arm;
+        rs.cart_state.vel = j_arm * rs.joint_state.v;
+    } else {
+        rs.cart_state.jacob.setZero();
+        rs.cart_state.vel.setZero();
     }
+    return true;
 }
 
 JointLimit DefaultJointLimit() {
@@ -55,327 +47,972 @@ CartLimit DefaultCartLimit() {
     return lim;
 }
 
+bool IsHardwareRelatedError(ErrorCode code) {
+    switch (code) {
+        case ErrorCode::ConnectError:
+        case ErrorCode::HardwareError:
+        case ErrorCode::ModeError:
+        case ErrorCode::EnableError:
+        case ErrorCode::ConfigError:
+            return true;
+        default:
+            return false;
+    }
+}
+
+void V7dToArray(const V7d& src, double dst[DOF]) {
+    for (int i = 0; i < DOF; ++i) {
+        dst[i] = src(i);
+    }
+}
+
+const char* EnableStateName(EnableState s) {
+    switch (s) {
+        case EnableState::Disabled:
+            return "Disabled";
+        case EnableState::Enabling:
+            return "Enabling";
+        case EnableState::Enabled:
+            return "Enabled";
+        case EnableState::Disabling:
+            return "Disabling";
+    }
+    return "?";
+}
+
+const char* ErrorCodeName(ErrorCode e) {
+    switch (e) {
+        case ErrorCode::Normal:
+            return "Normal";
+        case ErrorCode::ConnectError:
+            return "ConnectError";
+        case ErrorCode::InitError:
+            return "InitError";
+        case ErrorCode::HardwareError:
+            return "HardwareError";
+        case ErrorCode::ModeError:
+            return "ModeError";
+        case ErrorCode::EnableError:
+            return "EnableError";
+        case ErrorCode::ConfigError:
+            return "ConfigError";
+        case ErrorCode::MotionError:
+            return "MotionError";
+        case ErrorCode::PlanErr:
+            return "PlanErr";
+    }
+    return "?";
+}
+
 }  // namespace
 
-Robot::Robot(int arm_serial)
+void Robot::_LogErrorChange(ErrorCode prev, const char* source) {
+    if (impl_->error_code_ == prev) {
+        return;
+    }
+    MvDiag::LogEnable(impl_->arm_serial_, "err %s→%s (%s)",
+                      ErrorCodeName(prev), ErrorCodeName(impl_->error_code_), source);
+    MvDiag::LogVerbose(
+        impl_->arm_serial_,
+        "err detail: en=%s sdk=%d sdk_err=%d LowSpd=%d via %s",
+        EnableStateName(impl_->enable_state_), impl_->sdk_detail_.arm_state,
+        impl_->sdk_detail_.arm_err_code, impl_->low_spd_flag_, source);
+    impl_->diag_last_error_ = impl_->error_code_;
+    if (impl_->error_code_ == ErrorCode::Normal) {
+        impl_->diag_logged_enable_mismatch_ = false;
+    }
+}
+
+void Robot::_PostEnableDiag(EnableState prev_enable) {
+    if (impl_->enable_state_ != prev_enable) {
+        MvDiag::LogEnable(impl_->arm_serial_, "%s→%s",
+                          EnableStateName(prev_enable),
+                          EnableStateName(impl_->enable_state_));
+        MvDiag::LogVerbose(
+            impl_->arm_serial_,
+            "enable detail: mode=%s sdk=%d sdk_err=%d err=%s",
+            impl_->enable_mode_ == EnableMode::Enable ? "Enable" : "Disable",
+            impl_->sdk_detail_.arm_state, impl_->sdk_detail_.arm_err_code,
+            ErrorCodeName(impl_->error_code_));
+        impl_->diag_last_enable_ = impl_->enable_state_;
+    }
+    if (impl_->enable_state_ == EnableState::Enabled &&
+        impl_->error_code_ != ErrorCode::Normal && !impl_->diag_logged_enable_mismatch_) {
+        impl_->diag_logged_enable_mismatch_ = true;
+        MvDiag::LogEnable(impl_->arm_serial_,
+                          "MISMATCH: Enabled 但 err=%s，_CanAcceptCmd=false",
+                          ErrorCodeName(impl_->error_code_));
+    }
+}
+
+Robot::Impl::Impl(int arm_serial, const JointLimit& joint_lim,
+                  const CartLimit& cart_lim)
     : arm_serial_(arm_serial),
-      motion_stop_(DefaultJointLimit()),
-      motion_movj_(DefaultJointLimit()),
-      motion_movl_(DefaultCartLimit(), arm_serial),
-      motion_servoj_(DefaultJointLimit()),
-      motion_servop_(DefaultCartLimit(), arm_serial) {}
+      motion_stop_(joint_lim),
+      motion_movj_(joint_lim),
+      motion_movl_(cart_lim, arm_serial),
+      motion_servoj_(joint_lim),
+      motion_servop_(cart_lim, arm_serial),
+      motion_servop_pico_(cart_lim, arm_serial) {}
+
+Robot::Robot(int arm_serial)
+    : impl_(std::make_unique<Impl>(
+          arm_serial, DefaultJointLimit(), DefaultCartLimit())) {}
 
 Robot::~Robot() = default;
 
-bool Robot::_Init() {
-    status_code_ = StatusCode::Ready;
-    error_code_ = ErrorCode::Normal;
-#ifdef MV_CONTROL_SIM
-    ref_rs_.joint_state.q = V7d::Zero();
-    ref_rs_.joint_state.v = V7d::Zero();
-    ref_rs_.joint_state.a = V7d::Zero();
-    ref_rs_.joint_state.j = V7d::Zero();
-    ref_rs_.joint_state.tau = V7d::Zero();
-    ref_rs_.cart_state.vel = V6d::Zero();
-    ref_rs_.cart_state.jacob = Jacob::Zero();
-    if (IkSolver::IsReady()) {
-        if (!IkSolver::Forward(arm_serial_, ref_rs_.joint_state.q, ref_rs_.cart_state.pose)) {
-            error_code_ = ErrorCode::InitError;
-            return false;
-        }
-    }
-    resp_rs_ = ref_rs_;
-#endif
+Robot::Robot(Robot&&) noexcept = default;
+Robot& Robot::operator=(Robot&&) noexcept = default;
+
+bool Robot::_Init(bool is_sim) {
+    impl_->is_sim_ = is_sim;
+    impl_->status_code_ = StatusCode::Disabled;
+    impl_->error_code_ = ErrorCode::Normal;
+    impl_->enable_mode_ = EnableMode::Disable;
+    impl_->enable_state_ = EnableState::Disabled;
+    impl_->control_mode_target_ = ControlMode::Position;
+    impl_->control_mode_actual_ = ControlMode::Position;
+    impl_->pending_state_queue_.clear();
+    impl_->pending_motion_queue_.clear();
+    impl_->immediate_state_cmd_.reset();
     return true;
 }
 
-void Robot::_ApplyArmConfig(const ArmConfig& cfg) {
-    arm_serial_ = cfg.arm_serial;
-    home_q_ = cfg.home_q;
-    work_q_ = cfg.work_q;
-    joint_limit_ = cfg.joint_limit;
-    cart_limit_ = cfg.cart_limit;
-    motion_movj_.SetLimit(joint_limit_);
-    motion_movl_.SetLimit(cart_limit_);
-    motion_servoj_.SetLimit(joint_limit_);
-    motion_servop_.SetLimit(cart_limit_);
-    motion_stop_.SetLimit(joint_limit_);
+void Robot::_ApplyConfig(const ArmConfig& arm, const ServoConfig& servo,
+                         const ConnectConfig& connect, const ImpConfig& imp) {
+    impl_->arm_serial_ = arm.arm_serial;
+    impl_->home_q_ = arm.home_q;
+    impl_->work_q_ = arm.work_q;
+    impl_->joint_limit_ = arm.joint_limit;
+    impl_->cart_limit_ = arm.cart_limit;
+    impl_->motion_movj_.SetLimit(impl_->joint_limit_);
+    impl_->motion_movl_.SetLimit(impl_->cart_limit_);
+    impl_->motion_servoj_.SetLimit(impl_->joint_limit_);
+    impl_->motion_servop_.SetLimit(impl_->cart_limit_);
+    impl_->motion_servop_pico_.SetLimit(impl_->cart_limit_);
+    impl_->motion_stop_.SetLimit(impl_->joint_limit_);
+
+    impl_->motion_servoj_.SetPdGain(servo.servoj.p_gain, servo.servoj.d_gain);
+    impl_->motion_servop_.SetPdGain(servo.servop.p_gain, servo.servop.d_gain);
+    impl_->motion_servop_pico_.SetPdGain(servo.servop.p_gain, servo.servop.d_gain);
+
+    impl_->vel_ratio_ = connect.vel_ratio;
+    impl_->acc_ratio_ = connect.acc_ratio;
+    impl_->strict_init_state_ = connect.strict_init_state;
+    impl_->mode_transition_timeout_cycles_ = connect.mode_transition_timeout_ms;
+    if (impl_->mode_transition_timeout_cycles_ < 1) {
+        impl_->mode_transition_timeout_cycles_ = 1;
+    }
+
+    impl_->imp_config_ = imp;
 }
 
-void Robot::_PushCmd(CmdPackage pkg) {
-    cmd_queue_.push_back(pkg);
+void Robot::_ClearMotionCmds() {
+    impl_->cmd_queue_.clear();
+    impl_->stream_cmd_.reset();
+    impl_->stream_dirty_ = false;
+    if (impl_->active_motion_ == MotionType::ServoPByPico) {
+        impl_->motion_servop_pico_.ResetSession();
+    }
+    impl_->stop_pending_ = false;
+    impl_->active_motion_ = MotionType::None;
+    impl_->motion_inited_ = false;
+    impl_->active_cmd_.reset();
 }
 
-bool Robot::_IsServoCmd(CmdType type) const {
-    return type == CmdType::ServoJ || type == CmdType::ServoP;
+bool Robot::SetEnable(EnableMode mode) {
+    impl_->enable_mode_ = mode;
+
+    if (impl_->is_sim_) {
+        if (mode == EnableMode::Enable) {
+            StateCmdPackage cmd{};
+            cmd.type = StateCmdType::Enable;
+            cmd.vel_percent = impl_->vel_ratio_;
+            cmd.acc_percent = impl_->acc_ratio_;
+            impl_->pending_state_queue_.push_back(cmd);
+            impl_->control_mode_target_ = ControlMode::Position;
+            impl_->enable_state_ = EnableState::Enabling;
+            impl_->enable_transition_cycles_ = 0;
+            return true;
+        }
+        _ClearMotionCmds();
+        StateCmdPackage cmd{};
+        cmd.type = StateCmdType::Disable;
+        impl_->pending_state_queue_.push_back(cmd);
+        impl_->control_mode_target_ = ControlMode::Position;
+        impl_->enable_state_ = EnableState::Disabling;
+        impl_->enable_transition_cycles_ = 0;
+        return true;
+    }
+
+    if (mode == EnableMode::Enable && impl_->enable_state_ == EnableState::Enabled) {
+        return true;
+    }
+    if (mode == EnableMode::Disable && impl_->enable_state_ == EnableState::Disabled) {
+        return true;
+    }
+
+    if (mode == EnableMode::Enable) {
+        impl_->control_mode_target_ = ControlMode::Position;
+        MvDiag::LogVerbose(
+            impl_->arm_serial_,
+            "SetEnable(Enable) req: enable_state=%s err=%s sdk_CurState=%d LowSpdFlag=%d",
+            EnableStateName(impl_->enable_state_), ErrorCodeName(impl_->error_code_),
+            impl_->sdk_detail_.arm_state, impl_->low_spd_flag_);
+        StateCmdPackage cmd{};
+        cmd.type = StateCmdType::Enable;
+        cmd.vel_percent = impl_->vel_ratio_;
+        cmd.acc_percent = impl_->acc_ratio_;
+        impl_->pending_state_queue_.push_back(cmd);
+        const EnableState prev_en = impl_->enable_state_;
+        impl_->enable_state_ = EnableState::Enabling;
+        impl_->enable_transition_cycles_ = 0;
+        _PostEnableDiag(prev_en);
+    } else {
+        _ClearMotionCmds();
+        impl_->control_mode_target_ = ControlMode::Position;
+        StateCmdPackage cmd{};
+        cmd.type = StateCmdType::Disable;
+        impl_->pending_state_queue_.push_back(cmd);
+        const EnableState prev_en = impl_->enable_state_;
+        impl_->enable_state_ = EnableState::Disabling;
+        impl_->enable_transition_cycles_ = 0;
+        _PostEnableDiag(prev_en);
+    }
+    return true;
 }
 
-bool Robot::_IsServoMotion(MotionKind kind) const {
-    return kind == MotionKind::ServoJ || kind == MotionKind::ServoP;
+EnableState Robot::GetEnableState() const { return impl_->enable_state_; }
+
+void Robot::EStop() {
+    _ClearMotionCmds();
+    if (!impl_->is_sim_) {
+        StateCmdPackage cmd{};
+        cmd.type = StateCmdType::EStop;
+        impl_->immediate_state_cmd_ = cmd;
+    }
+    impl_->error_code_ = ErrorCode::HardwareError;
+    _EnterStopOnFault();
+}
+
+void Robot::_UpdateEnableState() {
+    const int st = impl_->sdk_detail_.arm_state;
+    if (st == 0 || st == 1 || st == 2 || st == 3 || st == 4 || st == 100) {
+        impl_->control_mode_actual_ =
+            MapSdkToControlMode(st, impl_->sdk_detail_.imp_type);
+    }
+
+    if (impl_->is_sim_) {
+        if (st == 0) {
+            impl_->enable_state_ = impl_->enable_mode_ == EnableMode::Enable
+                                       ? EnableState::Enabling
+                                       : EnableState::Disabled;
+            return;
+        }
+        if (IsModeTransitionState(st)) {
+            impl_->enable_state_ = impl_->enable_mode_ == EnableMode::Enable
+                                       ? EnableState::Enabling
+                                       : EnableState::Disabling;
+            return;
+        }
+        if (impl_->enable_mode_ == EnableMode::Enable && (st == 1 || st == 3)) {
+            impl_->enable_state_ = EnableState::Enabled;
+            return;
+        }
+        if (impl_->enable_mode_ == EnableMode::Disable) {
+            impl_->enable_state_ = EnableState::Disabling;
+            return;
+        }
+        impl_->enable_state_ = EnableState::Disabled;
+        return;
+    }
+
+    if (st == 1 && impl_->control_mode_actual_ == ControlMode::Position) {
+        impl_->enable_state_ = (impl_->enable_mode_ == EnableMode::Disable)
+                                   ? EnableState::Disabling
+                                   : EnableState::Enabled;
+        return;
+    }
+    if (st == 3 && impl_->enable_mode_ == EnableMode::Enable) {
+        impl_->enable_state_ = EnableState::Enabled;
+        return;
+    }
+    if (st == 0) {
+        if (impl_->enable_mode_ == EnableMode::Enable) {
+            impl_->enable_state_ = EnableState::Enabling;
+        } else {
+            impl_->enable_state_ = EnableState::Disabled;
+        }
+        return;
+    }
+    if (IsModeTransitionState(st)) {
+        impl_->enable_state_ = (impl_->enable_mode_ == EnableMode::Enable) ? EnableState::Enabling
+                                                             : EnableState::Disabling;
+        return;
+    }
+    if (st == 100) {
+        return;
+    }
+    if (impl_->enable_mode_ == EnableMode::Disable) {
+        impl_->enable_state_ = EnableState::Disabling;
+        return;
+    }
+    if (impl_->enable_mode_ == EnableMode::Enable) {
+        impl_->enable_state_ = EnableState::Enabling;
+        return;
+    }
+    impl_->enable_state_ = EnableState::Disabled;
+}
+
+bool Robot::_CallSdkControlMode(ControlMode mode) {
+    if (impl_->is_sim_) {
+        return true;
+    }
+
+    StateCmdPackage cmd{};
+    cmd.vel_percent = impl_->vel_ratio_;
+    cmd.acc_percent = impl_->acc_ratio_;
+
+    double k[DOF];
+    double d[DOF];
+    switch (mode) {
+        case ControlMode::Position:
+            cmd.type = StateCmdType::SetPositionMode;
+            impl_->pending_state_queue_.push_back(cmd);
+            return true;
+        case ControlMode::JointImp:
+            cmd.type = StateCmdType::SetJointImp;
+            V7dToArray(impl_->imp_config_.joint.K, k);
+            V7dToArray(impl_->imp_config_.joint.D, d);
+            for (int i = 0; i < DOF; ++i) {
+                cmd.k[i] = k[i];
+                cmd.d[i] = d[i];
+            }
+            impl_->pending_state_queue_.push_back(cmd);
+            return true;
+        case ControlMode::CartImp:
+            cmd.type = StateCmdType::SetCartImp;
+            V7dToArray(impl_->imp_config_.cart.K, k);
+            V7dToArray(impl_->imp_config_.cart.D, d);
+            for (int i = 0; i < DOF; ++i) {
+                cmd.k[i] = k[i];
+                cmd.d[i] = d[i];
+            }
+            cmd.rot_type = impl_->imp_config_.cart.rot_type;
+            for (int i = 0; i < DOF; ++i) {
+                cmd.cart_ctrl_para[i] = impl_->imp_config_.cart.cart_ctrl_para[i];
+            }
+            impl_->pending_state_queue_.push_back(cmd);
+            return true;
+        case ControlMode::Force: {
+            cmd.type = StateCmdType::SetForce;
+            for (int i = 0; i < 6; ++i) {
+                cmd.fx_dir[i] = impl_->imp_config_.force.fx_dir(i);
+            }
+            cmd.fc_adj_lmt = impl_->imp_config_.force.fc_adj_lmt;
+            impl_->pending_state_queue_.push_back(cmd);
+            return true;
+        }
+    }
+    return false;
+}
+
+bool Robot::SetControlMode(ControlMode mode) {
+    impl_->control_mode_target_ = mode;
+    if (impl_->control_mode_actual_ == mode) {
+        return true;
+    }
+
+    if (!impl_->is_sim_) {
+        if (mode != ControlMode::Position &&
+            impl_->sdk_detail_.arm_state == 0 &&
+            impl_->enable_state_ == EnableState::Disabled) {
+            impl_->error_code_ = ErrorCode::EnableError;
+            return false;
+        }
+    }
+
+    if (!_CallSdkControlMode(mode)) {
+        impl_->error_code_ = ErrorCode::ModeError;
+        return false;
+    }
+    if (impl_->is_sim_) {
+        switch (mode) {
+        case ControlMode::Position:
+            impl_->sdk_detail_.arm_state = 1;
+            impl_->sdk_detail_.imp_type = 0;
+            break;
+        case ControlMode::JointImp:
+            impl_->sdk_detail_.arm_state = 3;
+            impl_->sdk_detail_.imp_type = 1;
+            break;
+        case ControlMode::CartImp:
+            impl_->sdk_detail_.arm_state = 3;
+            impl_->sdk_detail_.imp_type = 2;
+            break;
+        case ControlMode::Force:
+            impl_->sdk_detail_.arm_state = 3;
+            impl_->sdk_detail_.imp_type = 3;
+            break;
+        }
+        _UpdateEnableState();
+    }
+    return true;
+}
+
+ControlModeStatus Robot::GetControlModeStatus() const {
+    if (impl_->is_sim_) {
+        if (impl_->control_mode_target_ != impl_->control_mode_actual_) {
+            return ControlModeStatus::Translating;
+        }
+    } else {
+        if (IsModeTransitionState(impl_->sdk_detail_.arm_state)) {
+            return ControlModeStatus::Translating;
+        }
+        if (impl_->enable_mode_ == EnableMode::Enable &&
+            impl_->control_mode_target_ != impl_->control_mode_actual_) {
+            return ControlModeStatus::Translating;
+        }
+    }
+    switch (impl_->control_mode_actual_) {
+        case ControlMode::Position:
+            return ControlModeStatus::Position;
+        case ControlMode::JointImp:
+            return ControlModeStatus::JointImp;
+        case ControlMode::CartImp:
+            return ControlModeStatus::CartImp;
+        case ControlMode::Force:
+            return ControlModeStatus::Force;
+    }
+    return ControlModeStatus::Position;
+}
+
+void Robot::_SubmitStream(MotionType type, const CmdPackage& pkg) {
+    if (!_CanAcceptCmd()) {
+        return;
+    }
+    if (!impl_->stream_cmd_.has_value()) {
+        impl_->stream_cmd_.emplace();
+    }
+    impl_->stream_cmd_->AssignFrom(pkg);
+    impl_->stream_dirty_ = true;
+
+    if (impl_->active_motion_ == type && impl_->motion_inited_) {
+        return;
+    }
+    const bool can_start =
+        impl_->active_motion_ == MotionType::None || _MotionDoneForSwitch();
+    if (can_start) {
+        if (impl_->active_motion_ != type &&
+            impl_->active_motion_ == MotionType::ServoPByPico) {
+            impl_->motion_servop_pico_.ResetSession();
+        }
+        impl_->active_motion_ = type;
+        impl_->motion_inited_ = false;
+        if (!impl_->active_cmd_.has_value()) {
+            impl_->active_cmd_.emplace();
+        }
+        impl_->active_cmd_->AssignFrom(pkg);
+        return;
+    }
+    if (IsStreamMotion(impl_->active_motion_) && impl_->active_motion_ != type) {
+        if (impl_->active_motion_ == MotionType::ServoPByPico) {
+            impl_->motion_servop_pico_.ResetSession();
+        }
+        impl_->active_motion_ = type;
+        impl_->motion_inited_ = false;
+        if (!impl_->active_cmd_.has_value()) {
+            impl_->active_cmd_.emplace();
+        }
+        impl_->active_cmd_->AssignFrom(pkg);
+    }
+}
+
+void Robot::_ApplyStreamCmd() {
+    if (!impl_->stream_dirty_ || !impl_->stream_cmd_.has_value()) {
+        return;
+    }
+    if (!IsStreamMotion(impl_->active_motion_) || !impl_->motion_inited_) {
+        return;
+    }
+    if (impl_->stream_cmd_->type != impl_->active_motion_) {
+        return;
+    }
+    switch (impl_->active_motion_) {
+        case MotionType::ServoJ:
+            impl_->motion_servoj_.RePlan(impl_->stream_cmd_->q, impl_->ref_rs_);
+            break;
+        case MotionType::ServoP:
+            impl_->motion_servop_.RePlan(impl_->stream_cmd_->pose, impl_->ref_rs_, impl_->ref_rs_.joint_state.q);
+            break;
+        case MotionType::ServoPByPico:
+            impl_->motion_servop_pico_.RePlan(impl_->stream_cmd_->pose, impl_->ref_rs_,
+                                       impl_->ref_rs_.joint_state.q);
+            break;
+        default:
+            break;
+    }
+    impl_->stream_dirty_ = false;
+}
+
+void Robot::_EnterStop() {
+    impl_->cmd_queue_.clear();
+    impl_->stream_cmd_.reset();
+    impl_->stream_dirty_ = false;
+    if (impl_->active_motion_ == MotionType::ServoPByPico) {
+        impl_->motion_servop_pico_.ResetSession();
+    }
+    impl_->stop_pending_ = true;
+    impl_->active_motion_ = MotionType::Stop;
+    impl_->motion_inited_ = false;
+    impl_->active_cmd_.reset();
+}
+
+void Robot::_EnterStopOnFault() {
+    impl_->cmd_queue_.clear();
+    impl_->stream_cmd_.reset();
+    impl_->stream_dirty_ = false;
+    if (impl_->active_motion_ == MotionType::ServoPByPico) {
+        impl_->motion_servop_pico_.ResetSession();
+    }
+    impl_->stop_pending_ = true;
+    if (impl_->active_motion_ != MotionType::Stop) {
+        impl_->active_motion_ = MotionType::Stop;
+        impl_->motion_inited_ = false;
+        impl_->active_cmd_.reset();
+    }
+}
+
+bool Robot::_CanAcceptCmd() const {
+    return impl_->error_code_ == ErrorCode::Normal &&
+           impl_->enable_state_ == EnableState::Enabled &&
+           impl_->status_code_ != StatusCode::Fault &&
+           impl_->status_code_ != StatusCode::Stopping;
 }
 
 void Robot::_ProcessCmdQueue() {
-    if (stop_pending_) {
-        if (active_motion_ != MotionKind::Stop) {
-            active_motion_ = MotionKind::Stop;
-            active_cmd_.reset();
-            motion_inited_ = false;
+    if (impl_->stop_pending_) {
+        if (impl_->active_motion_ != MotionType::Stop) {
+            impl_->active_motion_ = MotionType::Stop;
+            impl_->active_cmd_.reset();
+            impl_->motion_inited_ = false;
         }
         return;
     }
-    if (cmd_queue_.empty()) {
+    if (impl_->cmd_queue_.empty()) {
         return;
     }
 
-    const CmdPackage& front = cmd_queue_.front();
-    const bool servo_replan =
-        _IsServoCmd(front.type) && _IsServoMotion(active_motion_) && motion_inited_;
-
-    if (servo_replan) {
-        bool motion_done = true;
-        switch (active_motion_) {
-            case MotionKind::ServoJ:
-                motion_done = motion_servoj_.IsDone();
-                break;
-            case MotionKind::ServoP:
-                motion_done = motion_servop_.IsDone();
-                break;
-            default:
-                break;
-        }
-        if (!motion_done) {
-            CmdPackage pkg = cmd_queue_.front();
-            cmd_queue_.pop_front();
-            active_cmd_ = pkg;
-            if (pkg.type == CmdType::ServoJ) {
-                motion_servoj_.RePlan(pkg.q, resp_rs_);
-            } else {
-                motion_servop_.RePlan(pkg.pose, resp_rs_, work_q_);
-            }
-            motion_inited_ = true;
-            return;
-        }
-    }
-
-    const bool can_start = active_motion_ == MotionKind::None ||
-                           _MotionDoneForSwitch();
+    const bool can_start =
+        impl_->active_motion_ == MotionType::None || _MotionDoneForSwitch();
     if (!can_start) {
         return;
     }
 
-    CmdPackage pkg = cmd_queue_.front();
-    cmd_queue_.pop_front();
-    active_cmd_ = pkg;
-    motion_inited_ = false;
-
-    switch (pkg.type) {
-        case CmdType::Stop:
-            active_motion_ = MotionKind::Stop;
-            break;
-        case CmdType::ServoJ:
-            active_motion_ = MotionKind::ServoJ;
-            break;
-        case CmdType::ServoP:
-            active_motion_ = MotionKind::ServoP;
-            break;
-        case CmdType::MovJ:
-        case CmdType::GoWork:
-        case CmdType::GoHome:
-            active_motion_ = MotionKind::MovJ;
-            break;
-        case CmdType::MovL:
-            active_motion_ = MotionKind::MovL;
-            break;
+    const CmdPackage& pkg = impl_->cmd_queue_.front();
+    impl_->cmd_queue_.pop_front();
+    if (!impl_->active_cmd_.has_value()) {
+        impl_->active_cmd_.emplace();
     }
+    impl_->active_cmd_->AssignFrom(pkg);
+    impl_->motion_inited_ = false;
+    impl_->active_motion_ = pkg.type;
 }
 
 bool Robot::_MotionDoneForSwitch() {
-    switch (active_motion_) {
-        case MotionKind::Stop:
-            return motion_stop_.IsDone();
-        case MotionKind::ServoJ:
-            return motion_servoj_.IsDone();
-        case MotionKind::ServoP:
-            return motion_servop_.IsDone();
-        case MotionKind::MovJ:
-            return motion_movj_.IsDone();
-        case MotionKind::MovL:
-            return motion_movl_.IsDone();
+    if (IsStreamMotion(impl_->active_motion_)) {
+        return false;
+    }
+    switch (impl_->active_motion_) {
+        case MotionType::Stop:
+            return impl_->motion_stop_.IsDone();
+        case MotionType::MovJ:
+            return impl_->motion_movj_.IsDone();
+        case MotionType::MovL:
+            return impl_->motion_movl_.IsDone();
         default:
             return true;
     }
 }
 
 void Robot::_RunActiveMotion() {
-    if (active_motion_ == MotionKind::None) {
+    if (impl_->active_motion_ == MotionType::None) {
         return;
     }
 
-    if (!motion_inited_) {
-        switch (active_motion_) {
-            case MotionKind::Stop:
-                motion_stop_.InitPlan(resp_rs_);
+    if (!impl_->motion_inited_) {
+        switch (impl_->active_motion_) {
+            case MotionType::Stop:
+                impl_->motion_stop_.InitPlan(impl_->ref_rs_);
                 break;
-            case MotionKind::ServoJ: {
-                const V7d q = active_cmd_.has_value() ? active_cmd_->q : resp_rs_.joint_state.q;
-                motion_servoj_.InitPlan(q, resp_rs_);
-                break;
-            }
-            case MotionKind::ServoP: {
-                const Pose p = active_cmd_.has_value() ? active_cmd_->pose : resp_rs_.cart_state.pose;
-                motion_servop_.InitPlan(p, resp_rs_, work_q_);
+            case MotionType::ServoJ: {
+                const V7d q =
+                    impl_->active_cmd_.has_value() ? impl_->active_cmd_->q : impl_->ref_rs_.joint_state.q;
+                impl_->motion_servoj_.InitPlan(q, impl_->ref_rs_);
                 break;
             }
-            case MotionKind::MovJ: {
-                V7d target = active_cmd_->q;
-                if (active_cmd_->type == CmdType::GoWork) {
-                    target = work_q_;
-                } else if (active_cmd_->type == CmdType::GoHome) {
-                    target = home_q_;
+            case MotionType::ServoP: {
+                const Pose& p = impl_->active_cmd_.has_value() ? impl_->active_cmd_->pose
+                                                        : impl_->ref_rs_.cart_state.pose;
+                impl_->motion_servop_.InitPlan(p, impl_->ref_rs_, impl_->ref_rs_.joint_state.q);
+                break;
+            }
+            case MotionType::ServoPByPico:
+                impl_->motion_servop_pico_.InitPlan(impl_->active_cmd_->pose, impl_->ref_rs_,
+                                             impl_->ref_rs_.joint_state.q);
+                break;
+            case MotionType::MovJ:
+                impl_->motion_movj_.InitPlan(impl_->active_cmd_->q, impl_->ref_rs_);
+                if (!impl_->motion_movj_.TrajValid()) {
+                    impl_->error_code_ = ErrorCode::PlanErr;
                 }
-                motion_movj_.InitPlan(target, resp_rs_);
                 break;
-            }
-            case MotionKind::MovL:
-                motion_movl_.InitPlan(active_cmd_->pose, resp_rs_, work_q_);
+            case MotionType::MovL:
+                impl_->motion_movl_.InitPlan(impl_->active_cmd_->pose, impl_->ref_rs_);
                 break;
             default:
                 break;
         }
-        motion_inited_ = true;
+        impl_->motion_inited_ = true;
     }
 
-    switch (active_motion_) {
-        case MotionKind::Stop:
-            motion_stop_.RunPlan(resp_rs_, predeal_queue_);
+    switch (impl_->active_motion_) {
+        case MotionType::Stop:
+            impl_->motion_stop_.RunPlan(impl_->ref_rs_);
             break;
-        case MotionKind::ServoJ:
-            motion_servoj_.RunPlan(predeal_queue_);
+        case MotionType::ServoJ:
+            impl_->motion_servoj_.RunPlan(impl_->ref_rs_);
             break;
-        case MotionKind::ServoP:
-            motion_servop_.RunPlan(predeal_queue_);
+        case MotionType::ServoP:
+            impl_->motion_servop_.RunPlan(impl_->ref_rs_);
             break;
-        case MotionKind::MovJ:
-            motion_movj_.RunPlan(predeal_queue_);
+        case MotionType::ServoPByPico:
+            impl_->motion_servop_pico_.RunPlan(impl_->ref_rs_);
             break;
-        case MotionKind::MovL:
-            motion_movl_.RunPlan(predeal_queue_);
+        case MotionType::MovJ:
+            impl_->motion_movj_.RunPlan(impl_->ref_rs_);
+            break;
+        case MotionType::MovL:
+            impl_->motion_movl_.RunPlan(impl_->ref_rs_);
             break;
         default:
             break;
     }
 
-    if (_MotionDoneForSwitch()) {
-        active_motion_ = MotionKind::None;
-        active_cmd_.reset();
-        motion_inited_ = false;
-        if (stop_pending_) {
-            stop_pending_ = false;
+    UpdateCartFromJoint(impl_->arm_serial_, impl_->ref_rs_);
+
+    if (!IsStreamMotion(impl_->active_motion_) && _MotionDoneForSwitch()) {
+        impl_->active_motion_ = MotionType::None;
+        impl_->active_cmd_.reset();
+        impl_->motion_inited_ = false;
+        if (impl_->stop_pending_) {
+            impl_->stop_pending_ = false;
         }
     }
 }
 
-void Robot::_ApplyPredeal() {
-    if (predeal_queue_.empty()) {
+void Robot::_RunActiveMotionIfStopping() {
+    if (impl_->active_motion_ != MotionType::Stop) {
         return;
     }
-    const JointState js = predeal_queue_.front();
-    predeal_queue_.pop_front();
-    ApplyDiffToRef(ref_rs_, js);
-    UpdateRefCart(arm_serial_, ref_rs_);
+    if (!impl_->motion_inited_) {
+        impl_->motion_stop_.InitPlan(impl_->ref_rs_);
+        impl_->motion_inited_ = true;
+    }
+    impl_->motion_stop_.RunPlan(impl_->ref_rs_);
+    UpdateCartFromJoint(impl_->arm_serial_, impl_->ref_rs_);
+    if (impl_->motion_stop_.IsDone()) {
+        impl_->active_motion_ = MotionType::None;
+        impl_->motion_inited_ = false;
+        impl_->stop_pending_ = false;
+    }
 }
 
 void Robot::_UpdateStatus() {
-    if (stop_pending_ || active_motion_ == MotionKind::Stop) {
-        status_code_ = StatusCode::Stop;
+    if (impl_->error_code_ != ErrorCode::Normal) {
+        impl_->status_code_ = StatusCode::Fault;
         return;
     }
-    if (active_motion_ != MotionKind::None) {
-        status_code_ = StatusCode::Running;
+    if (impl_->enable_state_ != EnableState::Enabled) {
+        impl_->status_code_ = StatusCode::Disabled;
         return;
     }
-    status_code_ = StatusCode::Ready;
+    if (impl_->stop_pending_ || impl_->active_motion_ == MotionType::Stop) {
+        impl_->status_code_ = StatusCode::Stopping;
+        return;
+    }
+    if (impl_->active_motion_ != MotionType::None) {
+        impl_->status_code_ = StatusCode::Running;
+        return;
+    }
+    impl_->status_code_ = StatusCode::Ready;
 }
 
-void Robot::_Run() {
+void Robot::_TickTransitionTimeouts() {
+    if (impl_->error_code_ != ErrorCode::Normal) {
+        return;
+    }
+
+    const int limit = impl_->mode_transition_timeout_cycles_;
+    const bool enable_switching =
+        impl_->enable_state_ == EnableState::Enabling ||
+        impl_->enable_state_ == EnableState::Disabling;
+    if (enable_switching) {
+        if (++impl_->enable_transition_cycles_ >= limit) {
+            const ErrorCode prev_err = impl_->error_code_;
+            impl_->error_code_ = ErrorCode::EnableError;
+            MvDiag::LogEnable(impl_->arm_serial_, "enable TIMEOUT %d/%d → EnableError",
+                              impl_->enable_transition_cycles_, limit);
+            MvDiag::LogVerbose(impl_->arm_serial_, "enable TIMEOUT sdk=%d sdk_err=%d en=%s",
+                               impl_->sdk_detail_.arm_state, impl_->sdk_detail_.arm_err_code,
+                               EnableStateName(impl_->enable_state_));
+            _LogErrorChange(prev_err, "TickTransitionTimeouts/enable");
+            _EnterStopOnFault();
+            return;
+        }
+    } else {
+        impl_->enable_transition_cycles_ = 0;
+    }
+
+    bool mode_switching = false;
+    if (impl_->is_sim_) {
+        mode_switching =
+            impl_->control_mode_target_ != impl_->control_mode_actual_;
+    } else {
+        mode_switching = IsModeTransitionState(impl_->sdk_detail_.arm_state);
+        if (!mode_switching && impl_->enable_mode_ == EnableMode::Enable &&
+            impl_->control_mode_target_ != impl_->control_mode_actual_) {
+            mode_switching = true;
+        }
+    }
+    if (mode_switching) {
+        if (++impl_->mode_transition_cycles_ >= limit) {
+            const ErrorCode prev_err = impl_->error_code_;
+            impl_->error_code_ = ErrorCode::ModeError;
+            MvDiag::LogEnable(impl_->arm_serial_, "mode TIMEOUT %d/%d → ModeError",
+                              impl_->mode_transition_cycles_, limit);
+            MvDiag::LogVerbose(impl_->arm_serial_, "mode TIMEOUT sdk=%d imp=%d",
+                               impl_->sdk_detail_.arm_state, impl_->sdk_detail_.imp_type);
+            _LogErrorChange(prev_err, "TickTransitionTimeouts/mode");
+            _EnterStopOnFault();
+        }
+    } else {
+        impl_->mode_transition_cycles_ = 0;
+    }
+}
+
+void Robot::RunLogic() {
+    const EnableState prev_en = impl_->enable_state_;
+    _UpdateEnableState();
+    _PostEnableDiag(prev_en);
+    _TickTransitionTimeouts();
+
+    if (impl_->error_code_ != ErrorCode::Normal) {
+        _EnterStopOnFault();
+        _RunActiveMotionIfStopping();
+        _UpdateStatus();
+        return;
+    }
+
+    if (impl_->enable_state_ != EnableState::Enabled) {
+        _UpdateStatus();
+        return;
+    }
+
+    if (!_CanAcceptCmd()) {
+        _UpdateStatus();
+        return;
+    }
+
     _ProcessCmdQueue();
+    _ApplyStreamCmd();
     _RunActiveMotion();
-    _ApplyPredeal();
+    if (impl_->error_code_ != ErrorCode::Normal) {
+        _EnterStopOnFault();
+        _RunActiveMotionIfStopping();
+    }
     _UpdateStatus();
 }
 
-bool Robot::_Detect() { return true; }
+bool Robot::Detect() {
+    const EnableState prev_en = impl_->enable_state_;
+    _UpdateEnableState();
+    _PostEnableDiag(prev_en);
+
+    ErrorCode detected = ErrorCode::Normal;
+
+    if (!impl_->is_sim_) {
+        if (!impl_->read_buf_ok_) {
+            detected = ErrorCode::ConnectError;
+        } else if (impl_->sdk_detail_.frame_stale_cycles >= kSdkFrameStaleRunCycles) {
+            detected = ErrorCode::ConnectError;
+        } else {
+            detected = MapSdkToError(impl_->sdk_detail_, ErrorCode::Normal);
+            if (ShouldReportSdkModeMismatch(impl_->sdk_detail_.arm_state, impl_->sdk_detail_.imp_type,
+                                            impl_->enable_mode_, impl_->control_mode_target_)) {
+                detected = PickHigherPriorityError(detected, ErrorCode::ModeError);
+            }
+        }
+    }
+
+    if (detected != ErrorCode::Normal) {
+        const ErrorCode prev_err = impl_->error_code_;
+        impl_->error_code_ = detected;
+        _LogErrorChange(prev_err, "Detect/MapSdkToError");
+        _EnterStopOnFault();
+        return false;
+    }
+    // 通信恢复后清除瞬态 ConnectError，避免锁死写关节与运动规划
+    if (impl_->error_code_ == ErrorCode::ConnectError && impl_->read_buf_ok_ &&
+        impl_->sdk_detail_.frame_stale_cycles == 0) {
+        const ErrorCode prev_err = impl_->error_code_;
+        impl_->error_code_ = ErrorCode::Normal;
+        impl_->stop_pending_ = false;
+        if (impl_->active_motion_ == MotionType::Stop) {
+            impl_->active_motion_ = MotionType::None;
+            impl_->motion_inited_ = false;
+            impl_->active_cmd_.reset();
+        }
+        _LogErrorChange(prev_err, "Detect/ConnectRecovered");
+        _UpdateStatus();
+        return true;
+    }
+    if (impl_->error_code_ != ErrorCode::Normal) {
+        _EnterStopOnFault();
+        MvDiag::LogVerbose(
+            impl_->arm_serial_,
+            "Detect: SDK 无新故障但 internal error_code=%s 仍保留 (latched)",
+            ErrorCodeName(impl_->error_code_));
+    }
+    return true;
+}
 
 void Robot::Stop() {
-    cmd_queue_.clear();
-    stop_pending_ = true;
-    active_motion_ = MotionKind::Stop;
-    motion_inited_ = false;
-    active_cmd_.reset();
-    status_code_ = StatusCode::Stop;
+    if (impl_->enable_state_ != EnableState::Enabled ||
+        impl_->error_code_ != ErrorCode::Normal) {
+        return;
+    }
+    _EnterStop();
 }
 
 void Robot::ServoJ(const V7d& q) {
+    if (!_CanAcceptCmd()) {
+        return;
+    }
     CmdPackage pkg;
-    pkg.type = CmdType::ServoJ;
+    pkg.type = MotionType::ServoJ;
     pkg.q = q;
-    _PushCmd(pkg);
+    _SubmitStream(MotionType::ServoJ, pkg);
 }
 
 void Robot::ServoP(const Pose& pose) {
+    if (!_CanAcceptCmd()) {
+        return;
+    }
     CmdPackage pkg;
-    pkg.type = CmdType::ServoP;
+    pkg.type = MotionType::ServoP;
     pkg.pose = pose;
-    _PushCmd(pkg);
+    _SubmitStream(MotionType::ServoP, pkg);
 }
 
-void Robot::GoWork() {
+void Robot::ServoPByPico(const Pose& pose, bool is_run) {
+    if (!_CanAcceptCmd()) {
+        return;
+    }
+    if (!is_run) {
+        impl_->stream_cmd_.reset();
+        impl_->stream_dirty_ = false;
+        if (impl_->active_motion_ == MotionType::ServoPByPico) {
+            impl_->motion_servop_pico_.ResetSession();
+            impl_->active_motion_ = MotionType::None;
+            impl_->motion_inited_ = false;
+            impl_->active_cmd_.reset();
+        }
+        return;
+    }
     CmdPackage pkg;
-    pkg.type = CmdType::GoWork;
-    pkg.q = work_q_;
-    _PushCmd(pkg);
+    pkg.type = MotionType::ServoPByPico;
+    pkg.pose = pose;
+    _SubmitStream(MotionType::ServoPByPico, pkg);
 }
 
-void Robot::GoHome() {
-    CmdPackage pkg;
-    pkg.type = CmdType::GoHome;
-    pkg.q = home_q_;
-    _PushCmd(pkg);
-}
+void Robot::GoWork() { MovJ(impl_->work_q_); }
+
+void Robot::GoHome() { MovJ(impl_->home_q_); }
 
 void Robot::MovJ(const V7d& q) {
+    if (!_CanAcceptCmd()) {
+        return;
+    }
     CmdPackage pkg;
-    pkg.type = CmdType::MovJ;
+    pkg.type = MotionType::MovJ;
     pkg.q = q;
-    _PushCmd(pkg);
+    impl_->cmd_queue_.emplace_back();
+    impl_->cmd_queue_.back().AssignFrom(pkg);
 }
 
 void Robot::MovL(const Pose& pose) {
+    if (!_CanAcceptCmd()) {
+        return;
+    }
     CmdPackage pkg;
-    pkg.type = CmdType::MovL;
+    pkg.type = MotionType::MovL;
     pkg.pose = pose;
-    _PushCmd(pkg);
+    impl_->cmd_queue_.emplace_back();
+    impl_->cmd_queue_.back().AssignFrom(pkg);
 }
 
-void Robot::SetEnableMode(EnableMode enable_mode) { enable_mode_ = enable_mode; }
+const RobotState& Robot::GetRefState() const { return impl_->ref_rs_; }
 
-void Robot::SetControlMode(ControlMode control_mode) { control_mode_ = control_mode; }
+const RobotState& Robot::GetRespState() const { return impl_->resp_rs_; }
 
-RobotState Robot::GetRefState() const { return ref_rs_; }
+bool Robot::ClearError() {
+    _ClearMotionCmds();
 
-RobotState Robot::GetRespState() const { return resp_rs_; }
-
-void Robot::ClearError() { error_code_ = ErrorCode::Normal; }
-
-StatusCode Robot::GetStatusCode() const { return status_code_; }
-
-ErrorCode Robot::GetErrorCode() const { return error_code_; }
-
-void Robot::_SetRefState(const RobotState& rs) { ref_rs_ = rs; }
-
-void Robot::_SetRespState(const RobotState& rs) {
-    resp_rs_ = rs;
-    if (work_q_.isZero(1e-9)) {
-        work_q_ = rs.joint_state.q;
+    if (impl_->error_code_ == ErrorCode::MotionError ||
+        impl_->error_code_ == ErrorCode::PlanErr) {
+        impl_->error_code_ = ErrorCode::Normal;
+        _UpdateStatus();
+        return true;
     }
+
+    if (impl_->is_sim_) {
+        impl_->error_code_ = ErrorCode::Normal;
+    } else if (IsHardwareRelatedError(impl_->error_code_) ||
+               impl_->error_code_ == ErrorCode::InitError) {
+        if (impl_->sdk_detail_.frame_stale_cycles >= kSdkFrameStaleRunCycles) {
+            return false;
+        }
+        StateCmdPackage cmd{};
+        cmd.type = StateCmdType::ClearError;
+        impl_->immediate_state_cmd_ = cmd;
+        return true;
+    } else {
+        impl_->error_code_ = ErrorCode::Normal;
+    }
+
+    _UpdateEnableState();
+    _UpdateStatus();
+    return impl_->error_code_ == ErrorCode::Normal;
+}
+
+StatusCode Robot::GetStatusCode() const { return impl_->status_code_; }
+
+ErrorCode Robot::GetErrorCode() const { return impl_->error_code_; }
+
+bool Robot::_SetRespState(const RobotState& rs) {
+    impl_->resp_rs_.joint_state = rs.joint_state;
+    if (IkSolver::IsReady() && !UpdateCartFromJoint(impl_->arm_serial_, impl_->resp_rs_)) {
+        impl_->error_code_ = ErrorCode::InitError;
+        return false;
+    }
+    if (impl_->work_q_.isZero(1e-9)) {
+        impl_->work_q_ = rs.joint_state.q;
+    }
+    return true;
+}
+
+void Robot::_SetRefState(const RobotState& rs) {
+    impl_->ref_rs_.joint_state = rs.joint_state;
+    UpdateCartFromJoint(impl_->arm_serial_, impl_->ref_rs_);
 }

@@ -1,80 +1,158 @@
 #include "ik.hpp"
+#include "diag.hpp"
+#include "math.hpp"
 
-#include "FxRobot.h"
+#include <kdl/chain.hpp>
+#include <kdl/chainfksolverpos_recursive.hpp>
+#include <kdl/chainiksolverpos_nr.hpp>
+#include <kdl/chainiksolvervel_pinv.hpp>
+#include <kdl/chainjnttojacsolver.hpp>
+#include <kdl/frames.hpp>
+#include <kdl/jacobian.hpp>
+#include <kdl_parser/kdl_parser.hpp>
 
-#include <cmath>
+#include <array>
+#include <cstdio>
+#include <memory>
 
 namespace {
 
 bool g_kine_ready = false;
 
-void QToSdk7(const V7d& q, Vect7 out) {
-    for (int i = 0; i < DOF; ++i) {
-        out[i] = q(i) * R2D;  // SDK 关节角单位：度
-    }
+constexpr double kM2Mm = 1000.0;
+constexpr const char* kBaseLink = "Link_Base";
+constexpr const char* kTipLinks[2] = {"TCP_Link_L", "TCP_Link_R"};
+
+constexpr unsigned int kNrMaxIter = 100;
+constexpr double kNrEps = 1e-6;  // KDL 内部单位：m / rad
+constexpr double kIkPosTolMm = 5.0;
+constexpr double kIkOriTolRad = 0.087;  // ~5 deg
+
+std::array<KDL::Chain, 2> g_chains;
+std::array<std::unique_ptr<KDL::ChainFkSolverPos_recursive>, 2> g_fk;
+std::array<std::unique_ptr<KDL::ChainIkSolverVel_pinv>, 2> g_ik_vel;
+std::array<std::unique_ptr<KDL::ChainJntToJacSolver>, 2> g_jac;
+std::array<std::unique_ptr<KDL::ChainIkSolverPos_NR>, 2> g_ik_nr;
+
+void FrameToPose(const KDL::Frame& frame, Pose& pose) {
+    pose.pos = V3d(frame.p.x(), frame.p.y(), frame.p.z()) * kM2Mm;
+    double x = 0.0;
+    double y = 0.0;
+    double z = 0.0;
+    double w = 1.0;
+    frame.M.GetQuaternion(x, y, z, w);
+    pose.quat = Quat(w, x, y, z);
 }
 
-void SdkToQ7(const Vect7 q, V7d& out) {
-    for (int i = 0; i < DOF; ++i) {
-        out(i) = q[i] * D2R;  // 内部统一用弧度
-    }
+KDL::Frame PoseToFrame(const Pose& pose) {
+    KDL::Frame frame;
+    frame.p = KDL::Vector(pose.pos.x() / kM2Mm, pose.pos.y() / kM2Mm,
+                          pose.pos.z() / kM2Mm);
+    frame.M = KDL::Rotation::Quaternion(pose.quat.x(), pose.quat.y(),
+                                        pose.quat.z(), pose.quat.w());
+    return frame;
 }
 
-void PoseToMatrix4(const Pose& pose, Matrix4 mat) {
-    const M3d rot = pose.quat.normalized().toRotationMatrix();
-    for (int r = 0; r < 3; ++r) {
-        for (int c = 0; c < 3; ++c) {
-            mat[r][c] = rot(r, c);
+bool ForwardArm(int arm_serial, const V7d& q, Pose& out_arm) {
+    KDL::JntArray q_kdl(DOF);
+    for (int i = 0; i < DOF; ++i) {
+        q_kdl(i) = q(i);
+    }
+    KDL::Frame frame;
+    if (g_fk[arm_serial]->JntToCart(q_kdl, frame) < 0) {
+        return false;
+    }
+    FrameToPose(frame, out_arm);
+    return true;
+}
+
+bool JacobianArm(int arm_serial, const V7d& q, Jacob& out_jacob) {
+    KDL::JntArray q_kdl(DOF);
+    for (int i = 0; i < DOF; ++i) {
+        q_kdl(i) = q(i);
+    }
+    KDL::Jacobian jac_kdl(DOF);
+    if (g_jac[arm_serial]->JntToJac(q_kdl, jac_kdl) < 0) {
+        return false;
+    }
+    for (int r = 0; r < 6; ++r) {
+        for (int c = 0; c < DOF; ++c) {
+            double v = jac_kdl(r, c);
+            if (r < 3) {
+                v *= kM2Mm;  // m/rad -> mm/rad
+            }
+            out_jacob(r, c) = v;
         }
     }
-    mat[0][3] = pose.pos.x();
-    mat[1][3] = pose.pos.y();
-    mat[2][3] = pose.pos.z();
-    mat[3][0] = 0.0;
-    mat[3][1] = 0.0;
-    mat[3][2] = 0.0;
-    mat[3][3] = 1.0;
+    return true;
 }
 
-void Matrix4ToPose(const Matrix4 mat, Pose& pose) {
-    M3d rot;
-    for (int r = 0; r < 3; ++r) {
-        for (int c = 0; c < 3; ++c) {
-            rot(r, c) = mat[r][c];
-        }
+// FK 验误差：NR 返回成功但位姿未到位也视为 IK 失败
+bool VerifyIkPose(int arm_serial, const Pose& target_arm, const V7d& q) {
+    alignas(16) Pose fk;
+    if (!ForwardArm(arm_serial, q, fk)) {
+        MvDiag::EmitIkError(arm_serial, "FK_verify", 0, target_arm.pos.x(),
+                            target_arm.pos.y(), target_arm.pos.z());
+        return false;
     }
-    pose.quat = Quat(rot);
-    pose.pos.x() = mat[0][3];
-    pose.pos.y() = mat[1][3];
-    pose.pos.z() = mat[2][3];
+    const double pos_err = (fk.pos - target_arm.pos).norm();
+    const double ori_err = QuatLogLocal(fk.quat, target_arm.quat).norm();
+    if (pos_err > kIkPosTolMm || ori_err > kIkOriTolRad) {
+        MvDiag::EmitIkError(arm_serial, "pose_tol", 0, target_arm.pos.x(),
+                            target_arm.pos.y(), target_arm.pos.z(), pos_err, ori_err,
+                            fk.pos.x(), fk.pos.y(), fk.pos.z());
+        return false;
+    }
+    return true;
+}
+
+// KDL NR 位置 IK：目标与 ref 均在臂系
+bool SolveNrArm(int arm_serial, const Pose& target_arm, const V7d& ref_q,
+                V7d& out_q) {
+    KDL::JntArray q_in(DOF);
+    KDL::JntArray q_out(DOF);
+    for (int i = 0; i < DOF; ++i) {
+        q_in(i) = ref_q(i);
+    }
+    const KDL::Frame target = PoseToFrame(target_arm);
+    const int ret = g_ik_nr[arm_serial]->CartToJnt(q_in, target, q_out);
+    if (ret < 0) {
+        MvDiag::EmitIkError(arm_serial, "kdl_nr", ret, target_arm.pos.x(),
+                            target_arm.pos.y(), target_arm.pos.z());
+        return false;
+    }
+    for (int i = 0; i < DOF; ++i) {
+        out_q(i) = q_out(i);
+    }
+    return VerifyIkPose(arm_serial, target_arm, out_q);
 }
 
 }  // namespace
 
 bool IkSolver::IsReady() { return g_kine_ready; }
 
-bool IkSolver::InitFromCfg(const char* cfg_path) {
+bool IkSolver::InitFromUrdf(const char* urdf_path) {
     if (g_kine_ready) {
         return true;
     }
-    FX_INT32L type[2];
-    FX_DOUBLE grv[2][3];
-    FX_DOUBLE dh[2][8][4];
-    FX_DOUBLE pnva[2][7][4];
-    FX_DOUBLE bd[2][4][3];
-    FX_DOUBLE mass[2][7];
-    FX_DOUBLE mcp[2][7][3];
-    FX_DOUBLE inertia[2][7][6];
-    if (LOADMvCfg(const_cast<char*>(cfg_path), type, grv, dh, pnva, bd, mass, mcp,
-                  inertia) != FX_TRUE) {
+    KDL::Tree tree;
+    if (!kdl_parser::treeFromFile(urdf_path, tree)) {
         return false;
     }
     for (int arm = 0; arm < 2; ++arm) {
-        if (FX_Robot_Init_Type(arm, type[arm]) != FX_TRUE ||
-            FX_Robot_Init_Kine(arm, dh[arm]) != FX_TRUE ||
-            FX_Robot_Init_Lmt(arm, pnva[arm], bd[arm]) != FX_TRUE) {
+        if (!tree.getChain(kBaseLink, kTipLinks[arm], g_chains[arm])) {
             return false;
         }
+        if (g_chains[arm].getNrOfJoints() != DOF) {
+            return false;
+        }
+        g_fk[arm] =
+            std::make_unique<KDL::ChainFkSolverPos_recursive>(g_chains[arm]);
+        g_ik_vel[arm] =
+            std::make_unique<KDL::ChainIkSolverVel_pinv>(g_chains[arm]);
+        g_jac[arm] = std::make_unique<KDL::ChainJntToJacSolver>(g_chains[arm]);
+        g_ik_nr[arm] = std::make_unique<KDL::ChainIkSolverPos_NR>(
+            g_chains[arm], *g_fk[arm], *g_ik_vel[arm], kNrMaxIter, kNrEps);
     }
     g_kine_ready = true;
     return true;
@@ -82,40 +160,13 @@ bool IkSolver::InitFromCfg(const char* cfg_path) {
 
 bool IkSolver::Solve(int arm_serial, const Pose& target, const V7d& ref_q,
                      V7d& out_q) {
-    FX_InvKineSolvePara sp{};
-    PoseToMatrix4(target, sp.m_Input_IK_TargetTCP);
-    QToSdk7(ref_q, sp.m_Input_IK_RefJoint);
-    sp.m_Input_IK_ZSPType = 0;
-    if (FX_Robot_Kine_IK(arm_serial, &sp) != FX_TRUE) {
-        return false;
-    }
-    SdkToQ7(sp.m_Output_RetJoint, out_q);
-    return true;
+    return SolveNrArm(arm_serial, target, ref_q, out_q);
 }
 
 bool IkSolver::Forward(int arm_serial, const V7d& q, Pose& out_pose) {
-    FX_DOUBLE q_sdk[DOF];
-    QToSdk7(q, q_sdk);
-    Matrix4 mat{};
-    if (FX_Robot_Kine_FK(arm_serial, q_sdk, mat) != FX_TRUE) {
-        return false;
-    }
-    Matrix4ToPose(mat, out_pose);
-    return true;
+    return ForwardArm(arm_serial, q, out_pose);
 }
 
 bool IkSolver::Jacobian(int arm_serial, const V7d& q, Jacob& out_jacob) {
-    FX_DOUBLE q_sdk[DOF];
-    QToSdk7(q, q_sdk);
-    FX_Jacobi jcb{};
-    if (FX_Robot_Kine_Jacb(arm_serial, q_sdk, &jcb) != FX_TRUE) {
-        return false;
-    }
-    for (int r = 0; r < 6; ++r) {
-        for (int c = 0; c < DOF; ++c) {
-            // SDK 雅可比按 deg/s 求导，换算为 rad/s
-            out_jacob(r, c) = jcb.m_Jcb[r][c] * R2D;
-        }
-    }
-    return true;
+    return JacobianArm(arm_serial, q, out_jacob);
 }

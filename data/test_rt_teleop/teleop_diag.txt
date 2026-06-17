@@ -1,0 +1,9 @@
+pico_samples=6518
+valid_samples=6517 fresh_samples=6286
+first_valid_cycle=20
+nan_pose_samples=0
+trigger_ge_0.99_samples=4879
+right_x_span_m=0.741176
+
+结论:
+- 位姿有变化且无数值异常：Pico 发布与 C++ 订阅正常；若仿真不动请查 IK/diag_events。

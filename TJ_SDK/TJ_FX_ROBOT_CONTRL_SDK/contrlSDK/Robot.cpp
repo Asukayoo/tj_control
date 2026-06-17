@@ -375,60 +375,32 @@ CRobot::CRobot()
 	}
 	printf("  /var/tmp/ directory permissions:\n");
 	system("ls -ld /var/tmp/");
+	if (!m_ShMem.OnMapMster(&m_ShMem, shm_name, 102400))
+	{
+		m_ShMem.OnMapSlave(&m_ShMem, shm_name);
+	}
 #endif
+#ifndef _WIN32
+	m_psm = m_ShMem.OnGetMem(&m_ShMem);
+	if (m_psm == NULL)
+	{
+		printf("Map ShMem Err - m_psm is NULL\n");
+	}
+	else
+	{
+		printf("Map ShMem success - m_psm = %p\n", m_psm);
+	}
+#else
 	m_psm = m_ShMem.OnGetMem(&m_ShMem);
 	if (m_psm == NULL)
 	{
 		printf("Map Master Err - m_psm is NULL\n");
-#ifdef _WIN32
-#else
-		char cmd[256];
-		snprintf(cmd, sizeof(cmd), "ls -la %s 2>/dev/null || echo '  File not found'", shm_name);
-		system(cmd);
-		int fd = open(shm_name, O_RDWR);
-		if (fd != -1)
-		{
-			void *test_map = mmap(NULL, 102400, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-			if (test_map != MAP_FAILED)
-			{
-				munmap(test_map, 102400);
-			}
-			else
-			{
-				printf("    Direct mmap failed, errno: %d (%s)\n", errno, strerror(errno));
-			}
-			close(fd);
-		}
-		else
-		{
-			printf("    Failed to open file, errno: %d (%s)\n", errno, strerror(errno));
-		}
-#endif
-		m_psm = m_ShMem.OnGetMem(&m_ShMem);
-		if (m_psm == NULL)
-		{
-			printf("Map Slave Err - m_psm is NULL\n");
-#ifdef _WIN32
-			DWORD err = GetLastError();
-			printf("  Windows Error Code: %lu\n", err);
-			printf("  Checking if Global\\ path requires admin privileges\n");
-#else
-			printf("  errno: %d (%s)\n", errno, strerror(errno));
-			printf("  Checking file existence:\n");
-			char cmd[256];
-			snprintf(cmd, sizeof(cmd), "ls -la %s 2>/dev/null || echo '  File not found'", shm_name);
-			system(cmd);
-#endif
-		}
-		else
-		{
-			printf("Map Slave success - m_psm = %p\n", m_psm);
-		}
 	}
 	else
 	{
 		printf("Map Master success - m_psm = %p\n", m_psm);
 	}
+#endif
 	if (m_psm != NULL)
 	{
 		m_ACB_ShMem.OnSetBuf(m_psm, 102400);
@@ -1066,7 +1038,10 @@ void CRobot::DoRecv()
 		{
 			if (recvbuf[0] == 'F' && recvbuf[1] == 'X')
 			{
-				m_ACB_ShMem.WriteBuf((unsigned char *)recvbuf, Len);
+				if (m_psm != NULL)
+				{
+					m_ACB_ShMem.WriteBuf((unsigned char *)recvbuf, Len);
+				}
 				DCSS *p = (DCSS *)&recvbuf[2];
 				memcpy(&m_DCSS, p, sizeof(m_DCSS));
 				m_send_response_recv_tag = m_DCSS.m_Out[0].m_pad[0];
@@ -1141,6 +1116,8 @@ void CRobot::DoSend()
 {
 	if (m_SendTag == 100)
 	{
+		sendto(_tosock_, (char *)m_SendBuf, m_Slen, 0, (struct sockaddr *)&_to,
+		       sizeof(_to));
 		m_SendTag = 0;
 		m_Slen = 0;
 	}

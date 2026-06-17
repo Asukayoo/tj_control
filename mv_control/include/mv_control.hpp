@@ -2,98 +2,54 @@
 
 #include "common.hpp"
 #include "config.hpp"
+#include "hw_interface.hpp"
+#include "robot.hpp"
 
-#include <cstdint>
-#include <deque>
 #include <memory>
-#include <optional>
-
-#include "internal/in_data.hpp"
-#include "internal/motion.hpp"
-
-class MVControl;
-
-class Robot {
-    friend class MVControl;
-public:
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-    explicit Robot(int arm_serial = 0);
-    ~Robot();
-
-    void Stop();
-    void ServoJ(const V7d& q);
-    void ServoP(const Pose& pose);
-    void GoWork();
-    void GoHome();
-    void MovJ(const V7d& q);
-    void MovL(const Pose& pose);
-    void SetEnableMode(EnableMode enable_mode);
-    void SetControlMode(ControlMode control_mode);
-    RobotState GetRefState() const;
-    RobotState GetRespState() const;
-    void ClearError();
-    StatusCode GetStatusCode() const;
-    ErrorCode GetErrorCode() const;
-private:
-    void _SetRefState(const RobotState& rs);
-    void _SetRespState(const RobotState& rs);
-    bool _Init();
-    void _ApplyArmConfig(const ArmConfig& cfg);
-    void _Run();
-    bool _Detect();
-    void _PushCmd(CmdPackage pkg);
-    void _ProcessCmdQueue();
-    void _RunActiveMotion();
-    void _ApplyPredeal();
-    void _UpdateStatus();
-    bool _IsServoCmd(CmdType type) const;
-    bool _IsServoMotion(MotionKind kind) const;
-    bool _MotionDoneForSwitch();
-
-    int arm_serial_ = 0;
-    V7d work_q_ = V7d::Zero();
-    V7d home_q_ = V7d::Zero();
-    RobotState ref_rs_{};
-    RobotState resp_rs_{};
-    EnableMode enable_mode_ = EnableMode::Disable;
-    ControlMode control_mode_ = ControlMode::Position;
-    StatusCode status_code_ = StatusCode::Ready;
-    ErrorCode error_code_ = ErrorCode::Normal;
-    JointLimit joint_limit_{};
-    CartLimit cart_limit_{};
-
-    std::deque<CmdPackage> cmd_queue_;
-    std::deque<JointState> predeal_queue_;
-    MotionKind active_motion_ = MotionKind::None;
-    bool stop_pending_ = false;
-    bool motion_inited_ = false;
-
-    MotionStop motion_stop_;
-    MotionMovJ motion_movj_;
-    MotionMovL motion_movl_;
-    MotionServoJ motion_servoj_;
-    MotionServoP motion_servop_;
-    std::optional<CmdPackage> active_cmd_;
-};
 
 class MVControl {
 public:
     EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     MVControl();
     ~MVControl();
-    bool Init(uint8_t ip1, uint8_t ip2, uint8_t ip3, uint8_t ip4,
-              int log_switch = 0, const char* kine_cfg = nullptr);
-    bool InitFromConfig(const char* yaml_path);
+    bool Init(const char* config_path = MV_CONTROL_CONFIG_DEFAULT, bool is_sim = false,
+              std::shared_ptr<HwInterface> hw = nullptr);
     void Run();
     Robot& Left();
     Robot& Right();
+    bool BothArmsStationary() const;
+
+    struct HwRunStats {
+        bool sent_this_cycle = false;
+        uint64_t send_clear_fail_total = 0;
+        uint64_t send_slot_wait_max_us = 0;
+    };
+    struct ArmTransitionDiag {
+        uint16_t enable_trans_cycles = 0;
+        uint16_t enable_trans_limit = 0;
+        int sdk_cur_state = 0;
+    };
+    struct TransitionDiag {
+        ArmTransitionDiag left;
+        ArmTransitionDiag right;
+    };
+    const HwRunStats& LastHwRunStats() const { return last_hw_stats_; }
+    const TransitionDiag& LastTransitionDiag() const { return last_transition_diag_; }
+    void ResetHwRunStats();
+
 private:
-#ifndef MV_CONTROL_SIM
-    bool _ClearHwErrors();
-    bool _ReadHwToRobots();
-    bool _WriteRobotsToHw();
-#endif
+    void _ApplySnapshot(const HwSnapshot& snap, bool track_frame_serial);
+    void _BuildWriteRequest(HwWriteRequest& req);
+    void _QueueMotionIfNeeded(Robot& arm);
+    void _DrainStateForWrite(Robot& arm, HwArmWrite& slot);
+    void _DrainMotionForWrite(Robot& arm, HwArmWrite& slot);
+
+    std::shared_ptr<HwInterface> hw_;
+    ConnectConfig connect_cfg_{};
+    bool is_sim_ = false;
     bool connected_ = false;
+    HwRunStats last_hw_stats_{};
+    TransitionDiag last_transition_diag_{};
     Robot left_;
     Robot right_;
 };

@@ -1,0 +1,3 @@
+servo_hz=50
+pico_csv=/home/yxc/tj_control/data/test_teleop_data/pico_record_20260615_211537.csv
+pico_frames=982
