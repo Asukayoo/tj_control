@@ -29,7 +29,7 @@ struct HwSnapshot {
     bool read_ok = false;
 };
 
-// 状态写命令（Deferred 入 Robot 队列；Immediate 直接 ExecuteImmediate）
+// 状态写命令（Deferred 入 Robot 队列，Run 内非阻塞；仅 EStop 走 Immediate）
 struct HwStateCommand {
     enum class Op {
         Enable,
@@ -55,15 +55,22 @@ struct HwStateCommand {
     double fc_adj_lmt = 10.0;
 };
 
-struct HwMotionCommand {
-    double q_deg[DOF]{};
+// 阻抗模式每周期 K/D（与关节指令同批发送）
+struct HwImpKd {
+    double k[DOF]{};
+    double d[DOF]{};
+    bool is_cart = false;
 };
 
 struct HwArmWrite {
     bool has_state = false;
     HwStateCommand state{};
-    bool has_motion = false;
-    HwMotionCommand motion{};
+    // 使能后每周期流：关节目标 + 阻抗 K/D（按模式）
+    bool has_stream = false;
+    bool send_joint = false;
+    bool send_imp_kd = false;
+    double q_deg[DOF]{};
+    HwImpKd imp_kd{};
 };
 
 struct HwWriteRequest {
@@ -75,7 +82,7 @@ struct HwWriteResult {
     bool ok = true;
     bool udp_sent = false;
     bool had_state = false;
-    bool had_motion = false;
+    bool had_stream = false;
 };
 
 struct HwRunSlotStats {
@@ -95,11 +102,11 @@ public:
     bool Read(HwSnapshot& snap);
     bool Write(const HwWriteRequest& req, HwWriteResult& out);
 
-    // ClearError / EStop：同步阻塞，不经 Deferred 队列
+    // EStop：Run 内立即下发（无 sleep）
     bool ExecuteImmediate(const HwStateCommand& cmd);
 
-    // SetEnable / SetControlMode 入队前校验（静止、读 CurState 等）
-    bool PrepareDeferredState(HwStateCommand& cmd);
+    // 状态命令入队前校验；未就绪则返回 false，下周期重试（不阻塞）
+    bool PrepareDeferredState(HwStateCommand& cmd, bool is_stationary);
 
     bool WasSentLastCycle() const;
     bool WasSentThisCycle() const;
@@ -116,7 +123,7 @@ private:
 };
 
 inline bool HwStateOpIsImmediate(HwStateCommand::Op op) {
-    return op == HwStateCommand::Op::ClearError || op == HwStateCommand::Op::EStop;
+    return op == HwStateCommand::Op::EStop;
 }
 
 inline bool HwStateOpIsDeferred(HwStateCommand::Op op) {

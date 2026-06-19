@@ -13,7 +13,6 @@ namespace {
 
 constexpr int kArmCount = 2;
 
-// SIM Init 须显式清零；RobotState 默认构造不保证 Eigen 成员为 0
 RobotState MakeZeroRobotState() {
     RobotState rs;
     rs.joint_state.q.setZero();
@@ -39,68 +38,65 @@ MVControl::~MVControl() {
     connected_ = false;
 }
 
-void MVControl::_QueueMotionIfNeeded(Robot& arm) {
+void MVControl::_FillArmWrite(Robot& arm, HwArmWrite& slot) {
+    if (!arm.impl_->pending_state_queue_.empty()) {
+        const StateCmdPackage pending = arm.impl_->pending_state_queue_.front();
+        HwStateCommand hw_cmd{};
+        hw_cmd.arm = arm.impl_->arm_serial_;
+        hw_cmd.op = kStateCmdHwOpMap[static_cast<int>(pending.type)];
+        hw_cmd.vel_percent = pending.vel_percent;
+        hw_cmd.acc_percent = pending.acc_percent;
+        hw_cmd.set_target_state = pending.set_target_state;
+        hw_cmd.rot_type = pending.rot_type;
+        hw_cmd.fc_adj_lmt = pending.fc_adj_lmt;
+        for (int i = 0; i < DOF; ++i) {
+            hw_cmd.k[i] = pending.k[i];
+            hw_cmd.d[i] = pending.d[i];
+            hw_cmd.cart_ctrl_para[i] = pending.cart_ctrl_para[i];
+        }
+        for (int i = 0; i < 6; ++i) {
+            hw_cmd.fx_dir[i] = pending.fx_dir[i];
+        }
+        const bool is_stationary = arm.impl_->low_spd_flag_ == 1;
+        if (!is_sim_ && !hw_->PrepareDeferredState(hw_cmd, is_stationary)) {
+            return;  // 未就绪，保留队列，下周期再试
+        }
+        arm.impl_->pending_state_queue_.pop_front();
+        slot.has_state = true;
+        slot.state = hw_cmd;
+    }
+
     const Robot::Impl& impl = *arm.impl_;
     if (impl.enable_state_ != EnableState::Enabled ||
-        impl.control_mode_actual_ != ControlMode::Position ||
-        impl.error_code_ != ErrorCode::Normal ||
-        (impl.status_code_ != StatusCode::Ready &&
-         impl.status_code_ != StatusCode::Running &&
-         impl.status_code_ != StatusCode::Stopping)) {
+        impl.error_code_ != ErrorCode::Normal) {
         return;
     }
-    CmdPackage pkg;
-    pkg.type = MotionType::PositionServo;
-    pkg.q = impl.ref_rs_.joint_state.q;
-    arm.impl_->pending_motion_queue_.push_back(pkg);
-}
+    const ControlMode mode = impl.control_mode_actual_;
+    if (mode != ControlMode::Position && mode != ControlMode::JointImp &&
+        mode != ControlMode::CartImp) {
+        return;
+    }
+    if (impl.status_code_ != StatusCode::Ready &&
+        impl.status_code_ != StatusCode::Running &&
+        impl.status_code_ != StatusCode::Stopping) {
+        return;
+    }
 
-void MVControl::_DrainStateForWrite(Robot& arm, HwArmWrite& slot) {
-    if (arm.impl_->pending_state_queue_.empty()) {
-        return;
-    }
-    const StateCmdPackage pending = arm.impl_->pending_state_queue_.front();
-    HwStateCommand hw_cmd{};
-    hw_cmd.arm = arm.impl_->arm_serial_;
-    hw_cmd.op = kStateCmdHwOpMap[static_cast<int>(pending.type)];
-    hw_cmd.vel_percent = pending.vel_percent;
-    hw_cmd.acc_percent = pending.acc_percent;
-    hw_cmd.set_target_state = pending.set_target_state;
-    hw_cmd.rot_type = pending.rot_type;
-    hw_cmd.fc_adj_lmt = pending.fc_adj_lmt;
-    for (int i = 0; i < DOF; ++i) {
-        hw_cmd.k[i] = pending.k[i];
-        hw_cmd.d[i] = pending.d[i];
-        hw_cmd.cart_ctrl_para[i] = pending.cart_ctrl_para[i];
-    }
-    for (int i = 0; i < 6; ++i) {
-        hw_cmd.fx_dir[i] = pending.fx_dir[i];
-    }
-    if (!is_sim_ && !hw_->PrepareDeferredState(hw_cmd)) {
-        arm.impl_->pending_state_queue_.pop_front();
-        if (pending.type == StateCmdType::Enable ||
-            pending.type == StateCmdType::Disable) {
-            arm.impl_->error_code_ = ErrorCode::EnableError;
+    slot.has_stream = true;
+    slot.send_joint = true;
+    V7dToSdkDeg(impl.ref_rs_.joint_state.q, slot.q_deg);
+
+    if (mode == ControlMode::JointImp || mode == ControlMode::CartImp) {
+        slot.send_imp_kd = true;
+        slot.imp_kd.is_cart = (mode == ControlMode::CartImp);
+        if (mode == ControlMode::JointImp) {
+            V7dToArray(impl.imp_config_.joint.K, slot.imp_kd.k);
+            V7dToArray(impl.imp_config_.joint.D, slot.imp_kd.d);
         } else {
-            arm.impl_->error_code_ = ErrorCode::ModeError;
+            V7dToArray(impl.imp_config_.cart.K, slot.imp_kd.k);
+            V7dToArray(impl.imp_config_.cart.D, slot.imp_kd.d);
         }
-        return;
     }
-    arm.impl_->pending_state_queue_.pop_front();
-    slot.has_state = true;
-    slot.state = hw_cmd;
-}
-
-void MVControl::_DrainMotionForWrite(Robot& arm, HwArmWrite& slot) {
-    if (arm.impl_->pending_motion_queue_.empty()) {
-        return;
-    }
-    slot.has_motion = true;
-    const CmdPackage& pkg = arm.impl_->pending_motion_queue_.front();
-    for (int i = 0; i < DOF; ++i) {
-        slot.motion.q_deg[i] = pkg.q(i) * R2D;
-    }
-    arm.impl_->pending_motion_queue_.pop_front();
 }
 
 bool MVControl::Init(const char* config_path, bool is_sim,
@@ -203,23 +199,19 @@ void MVControl::Run() {
         }
         const StateCmdPackage cmd = *arm->impl_->immediate_state_cmd_;
         arm->impl_->immediate_state_cmd_.reset();
-        if (is_sim_) {
-            if (cmd.type == StateCmdType::ClearError) {
-                arm->impl_->error_code_ = ErrorCode::Normal;
-                arm->_UpdateEnableState();
-                arm->_UpdateStatus();
-            }
+        if (is_sim_ && cmd.type == StateCmdType::EStop) {
+            arm->impl_->error_code_ = ErrorCode::HardwareError;
+            arm->_UpdateEnableState();
+            arm->_UpdateStatus();
+            continue;
+        }
+        if (is_sim_ || cmd.type != StateCmdType::EStop) {
             continue;
         }
         HwStateCommand hw_cmd{};
         hw_cmd.arm = arm->impl_->arm_serial_;
-        hw_cmd.op = kStateCmdHwOpMap[static_cast<int>(cmd.type)];
-        const bool ok = hw_->ExecuteImmediate(hw_cmd);
-        if (cmd.type == StateCmdType::ClearError && ok) {
-            arm->impl_->error_code_ = ErrorCode::Normal;
-            arm->_UpdateEnableState();
-            arm->_UpdateStatus();
-        }
+        hw_cmd.op = HwStateCommand::Op::EStop;
+        hw_->ExecuteImmediate(hw_cmd);
     }
 
     left_.Detect();
@@ -227,34 +219,23 @@ void MVControl::Run() {
     left_.RunLogic();
     right_.RunLogic();
 
-    _QueueMotionIfNeeded(left_);
-    _QueueMotionIfNeeded(right_);
-
     HwWriteRequest wr{};
-    _BuildWriteRequest(wr);
+    _FillArmWrite(left_, wr.left);
+    _FillArmWrite(right_, wr.right);
 
     if (is_sim_) {
-        double q_left[DOF]{};
-        double q_right[DOF]{};
-        if (wr.left.has_motion) {
-            for (int i = 0; i < DOF; ++i) {
-                q_left[i] = wr.left.motion.q_deg[i];
-            }
-            hw_->SetSimRefJoints(0, q_left);
+        if (wr.left.has_stream && wr.left.send_joint) {
+            hw_->SetSimRefJoints(0, wr.left.q_deg);
         }
-        if (wr.right.has_motion) {
-            for (int i = 0; i < DOF; ++i) {
-                q_right[i] = wr.right.motion.q_deg[i];
-            }
-            hw_->SetSimRefJoints(1, q_right);
+        if (wr.right.has_stream && wr.right.send_joint) {
+            hw_->SetSimRefJoints(1, wr.right.q_deg);
         }
     }
 
     HwWriteResult wout{};
     hw_->Write(wr, wout);
 
-    if (is_sim_ && (wr.left.has_motion || wr.right.has_motion || wr.left.has_state ||
-                    wr.right.has_state)) {
+    if (is_sim_ && (wout.had_state || wout.had_stream)) {
         hw_->Read(snap);
         _ApplySnapshot(snap, false);
         left_._UpdateEnableState();
@@ -340,11 +321,4 @@ void MVControl::_ApplySnapshot(const HwSnapshot& snap, bool track_frame_serial) 
             arms[i]->impl_->sdk_detail_.frame_stale_cycles++;
         }
     }
-}
-
-void MVControl::_BuildWriteRequest(HwWriteRequest& req) {
-    _DrainStateForWrite(left_, req.left);
-    _DrainMotionForWrite(left_, req.left);
-    _DrainStateForWrite(right_, req.right);
-    _DrainMotionForWrite(right_, req.right);
 }

@@ -517,9 +517,12 @@ void MotionServoP::RePlan(const Pose& target_pose, const RobotState& ref_rs,
 }
 
 void MotionServoP::RunPlan(RobotState& ref_rs) {
+    MvDiag::ServoPicoArmTrace& trace = MvDiag::ServoPicoTraceGet().arm[arm_serial_];
     if (!init_) {
+        ++trace.servo_skip_init;
         return;
     }
+    ++trace.servo_run;
 
     if (t_cur_ <= t_) {
         V6d prof_v = V6d::Zero();
@@ -554,9 +557,11 @@ void MotionServoP::RunPlan(RobotState& ref_rs) {
 
     V7d q;
     if (!IkSolver::Solve(arm_serial_, ik_pose, ref_q_, q)) {
+        ++trace.ik_fail;
         init_ = false;
         return;
     }
+    ++trace.ik_ok;
     const V7d v = (q - last_q_) / kControlDt;
     WriteJointQ(ref_rs, q, v);
     last_q_ = q;
@@ -589,11 +594,13 @@ void MotionServoPByPico::InitPlan(const Pose& pico_pose, const RobotState& ref_r
                                   const V7d& ref_q) {
     ref_pico_ = pico_pose;
     if (!IkSolver::Forward(arm_serial_, ref_rs.joint_state.q, robot_anchor_)) {
+        ++MvDiag::ServoPicoTraceGet().arm[arm_serial_].session_fk_fail;
         MvDiag::EmitMotionError(arm_serial_, "ServoPByPico", "anchor_FK_fail");
         ResetSession();
         return;
     }
     session_active_ = true;
+    ++MvDiag::ServoPicoTraceGet().arm[arm_serial_].session_init;
     alignas(16) Pose abs_target;
     PicoToAbsTarget(pico_pose, abs_target);
     servo_.InitPlan(abs_target, ref_rs, ref_q);
@@ -601,14 +608,18 @@ void MotionServoPByPico::InitPlan(const Pose& pico_pose, const RobotState& ref_r
 
 void MotionServoPByPico::RePlan(const Pose& pico_pose, const RobotState& ref_rs,
                                 const V7d& ref_q) {
+    ++MvDiag::ServoPicoTraceGet().arm[arm_serial_].replan;
     alignas(16) Pose abs_target;
     PicoToAbsTarget(pico_pose, abs_target);
     servo_.RePlan(abs_target, ref_rs, ref_q);
 }
 
 void MotionServoPByPico::RunPlan(RobotState& ref_rs) {
+    MvDiag::ServoPicoArmTrace& trace = MvDiag::ServoPicoTraceGet().arm[arm_serial_];
     if (!session_active_) {
+        ++trace.run_skip_session;
         return;
     }
+    ++trace.run_session;
     servo_.RunPlan(ref_rs);
 }

@@ -23,15 +23,19 @@ connect:
   strict_init_state: true
   servo_err_poll_cycles: 0      # Run 内不轮询；伺服故障靠 OnGetBuf 的 m_ERRCode==2
 
-# 阻抗/力控参数（SetControlMode 非 Position 时使用）
+# 阻抗/力控（须先下使能 SetControlMode，再 SetEnable 上使能进入该模式）
+# 关节 K/D 参考 DEMO_C++/showcase_offline_movl_keepj_execution.cpp
+# 笛卡尔 K/D 参考 DEMO_C++/showcase_offline_movl_execution.cpp
 imp:
   joint:
-    K: [100, 100, 100, 100, 50, 50, 50]
-    D: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+    # K[7] 关节刚度 N·m/rad（SDK 建议 ≤2）；D[7] 阻尼比 0~1
+    K: [2, 2, 2, 1.6, 1, 1, 1]
+    D: [0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.4]
   cart:
-    K: [500, 500, 500, 50, 50, 50, 50]
-    D: [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
-    rot_type: 2
+    # K[0~2] 平移 N/m；K[3~5] 旋转 N·m/rad；K[6] 零空间；D 均为阻尼比 0~1
+    K: [8000, 8000, 8000, 600, 600, 600, 20]
+    D: [0.8, 0.8, 0.8, 0.4, 0.4, 0.4, 1]
+    rot_type: 2   # 0 不定义末端旋转；1 自定义；2 自动
   force:
     fx_dir: [0, 0, 1, 0, 0, 0]
     fc_adj_lmt: 10.0

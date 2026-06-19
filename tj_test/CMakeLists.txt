@@ -34,6 +34,12 @@ target_compile_definitions(test_movj PRIVATE
     TJ_DATA_DEFAULT="${CMAKE_SOURCE_DIR}/data/test_movj")
 tj_test_configure_runtime(test_movj)
 
+add_executable(test_control_mode test_control_mode.cpp)
+target_link_libraries(test_control_mode PRIVATE tj_test_support)
+target_compile_definitions(test_control_mode PRIVATE
+    TJ_DATA_DEFAULT="${CMAKE_SOURCE_DIR}/data/test_control_mode")
+tj_test_configure_runtime(test_control_mode)
+
 add_executable(test_servo test_servo.cpp)
 target_link_libraries(test_servo PRIVATE tj_test_support)
 target_compile_definitions(test_servo PRIVATE
@@ -53,4 +59,5 @@ add_custom_target(tj_test_grant_rt_caps
   COMMAND ${CMAKE_COMMAND} -E echo
           "tj_test RT: bash ${CMAKE_SOURCE_DIR}/tj_test/grant_rt_caps.sh ${CMAKE_BINARY_DIR}"
   VERBATIM)
-add_dependencies(tj_test_grant_rt_caps test_movj test_enable test_servo test_rt_teleop)
+add_dependencies(tj_test_grant_rt_caps test_movj test_enable test_servo test_rt_teleop
+                 test_control_mode)

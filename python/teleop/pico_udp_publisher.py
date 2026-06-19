@@ -24,6 +24,7 @@ try:
       PoseOneEuroFilter,
       pose_xyzw_is_valid,
   )
+  from python.teleop.pico_coord import relative_pose, transform_pose_sdk_to_fluz
   from python.teleop.pico_csv_source import iter_pico_csv
   from python.teleop.pico_servo_cart_source import iter_servo_cart_dir
 except ImportError:
@@ -32,6 +33,7 @@ except ImportError:
       PoseOneEuroFilter,
       pose_xyzw_is_valid,
   )
+  from pico_coord import relative_pose, transform_pose_sdk_to_fluz  # type: ignore
   from pico_csv_source import iter_pico_csv  # type: ignore
   from pico_servo_cart_source import iter_servo_cart_dir  # type: ignore
 
@@ -97,6 +99,27 @@ def _process_pose(
   return out, out.copy(), True
 
 
+def _output_pose(pose: np.ndarray, use_fluz: bool) -> np.ndarray:
+  """SDK 系位姿 → 发布系（FLUZ 或原样）。"""
+  if not use_fluz:
+    return pose
+  return transform_pose_sdk_to_fluz(pose)
+
+
+def _controller_pose_in_head_frame(
+    ctrl_sdk: np.ndarray,
+    head_sdk: np.ndarray,
+    use_fluz: bool,
+) -> np.ndarray:
+  """手柄世界系位姿 → 头显系位姿（可选 FLUZ）。"""
+  if use_fluz:
+    return relative_pose(
+        _output_pose(ctrl_sdk, True),
+        _output_pose(head_sdk, True),
+    )
+  return relative_pose(ctrl_sdk, head_sdk)
+
+
 def _publish_loop(
     frame_iter: Iterator[Dict[str, Any]],
     host: str,
@@ -109,6 +132,7 @@ def _publish_loop(
     max_frames: int,
     max_ticks: int,
     source_name: str,
+    use_fluz: bool,
 ) -> int:
   period = 1.0 / max(1e-3, rate_hz)
   dt = period
@@ -117,13 +141,16 @@ def _publish_loop(
 
   right_f = PoseOneEuroFilter(pos_params, ori_params) if use_filter else None
   left_f = PoseOneEuroFilter(pos_params, ori_params) if use_filter else None
+  head_f = PoseOneEuroFilter(pos_params, ori_params) if use_filter else None
   last_good_r: np.ndarray | None = None
   last_good_l: np.ndarray | None = None
+  last_good_h: np.ndarray | None = None
 
   mode = "dry-run" if dry_run else f"udp→{host}:{port}"
   filt = "one_euro" if use_filter else "raw"
+  frame = "fluz(X前Y左Z上,相对头显)" if use_fluz else "sdk(X右Y上Z里,相对头显)"
   print(f"[pico_udp] source={source_name}  {mode}  {rate_hz:.0f}Hz  "
-        f"filter={filt}  pkt={PICO_UDP_SIZE}B", flush=True)
+        f"filter={filt}  frame={frame}  pkt={PICO_UDP_SIZE}B", flush=True)
 
   seq = 0
   sent = 0
@@ -136,12 +163,16 @@ def _publish_loop(
       ts = int(snap["timestamp_ns"])
       rp_raw = np.asarray(snap["right_controller"], dtype=np.float64)
       lp_raw = np.asarray(snap["left_controller"], dtype=np.float64)
+      hp_raw = np.asarray(snap["headset"], dtype=np.float64)
       rt = float(snap["right_trigger"])
       lt = float(snap["left_trigger"])
 
-      right_pose, last_good_r, ok_r = _process_pose(rp_raw, right_f, dt, last_good_r)
-      left_pose, last_good_l, ok_l = _process_pose(lp_raw, left_f, dt, last_good_l)
-      pose_valid = ok_r and ok_l
+      right_sdk, last_good_r, ok_r = _process_pose(rp_raw, right_f, dt, last_good_r)
+      left_sdk, last_good_l, ok_l = _process_pose(lp_raw, left_f, dt, last_good_l)
+      head_sdk, last_good_h, ok_h = _process_pose(hp_raw, head_f, dt, last_good_h)
+      right_pose = _controller_pose_in_head_frame(right_sdk, head_sdk, use_fluz)
+      left_pose = _controller_pose_in_head_frame(left_sdk, head_sdk, use_fluz)
+      pose_valid = ok_r and ok_l and ok_h
 
       if not pose_valid:
         skipped += 1
@@ -188,8 +219,10 @@ def _wait_live_pose(rx: PicoDataReceiver, timeout_s: float) -> bool:
     snap = rx.read_all()
     rp = np.asarray(snap["poses"]["right_controller"], dtype=np.float64)
     lp = np.asarray(snap["poses"]["left_controller"], dtype=np.float64)
-    if pose_xyzw_is_valid(rp) or pose_xyzw_is_valid(lp):
-      print("[pico_udp] SDK 位姿已就绪", flush=True)
+    hp = np.asarray(snap["poses"]["headset"], dtype=np.float64)
+    if (pose_xyzw_is_valid(rp) and pose_xyzw_is_valid(lp)
+        and pose_xyzw_is_valid(hp)):
+      print("[pico_udp] SDK 位姿已就绪（头显+双手柄）", flush=True)
       return True
     time.sleep(0.05)
   print("[pico_udp] WARN: SDK 超时仍无有效位姿（PC Service/头显/手柄？）", flush=True)
@@ -203,6 +236,7 @@ def live_frame_iter(rx: PicoDataReceiver) -> Iterator[Dict[str, Any]]:
         "timestamp_ns": int(snap["timestamp_ns"]),
         "right_controller": np.asarray(snap["poses"]["right_controller"], dtype=np.float64),
         "left_controller": np.asarray(snap["poses"]["left_controller"], dtype=np.float64),
+        "headset": np.asarray(snap["poses"]["headset"], dtype=np.float64),
         "right_trigger": float(snap["values"]["right_trigger"]),
         "left_trigger": float(snap["values"]["left_trigger"]),
     }
@@ -219,6 +253,7 @@ def run_live(
     warmup_s: float,
     max_frames: int,
     max_ticks: int,
+    use_fluz: bool,
 ) -> int:
   with PicoDataReceiver() as rx:
     time.sleep(0.5)
@@ -235,6 +270,7 @@ def run_live(
         max_frames,
         max_ticks,
         "live_sdk",
+        use_fluz,
     )
 
 
@@ -250,6 +286,7 @@ def run_replay(
     loop: bool,
     max_frames: int,
     max_ticks: int,
+    use_fluz: bool,
 ) -> int:
   if not csv_path.is_file():
     print(f"[pico_udp] FAIL: CSV 不存在 {csv_path}", file=sys.stderr)
@@ -266,6 +303,7 @@ def run_replay(
       max_frames,
       max_ticks,
       f"replay:{csv_path.name}",
+      use_fluz,
   )
 
 
@@ -294,6 +332,7 @@ def run_replay_servo_cart(
   except FileNotFoundError as e:
     print(f"[pico_udp] FAIL: {e}", file=sys.stderr)
     return 1
+  # ref_cart 已是机器人笛卡尔系，勿再做 SDK→FLUZ
   return _publish_loop(
       frame_iter,
       host,
@@ -306,6 +345,7 @@ def run_replay_servo_cart(
       max_frames,
       max_ticks,
       f"servo_cart:{dir_path.name}",
+      use_fluz=False,
   )
 
 
@@ -315,6 +355,12 @@ def main() -> None:
   parser.add_argument("--port", type=int, default=30101)
   parser.add_argument("--rate", type=float, default=50.0)
   parser.add_argument("--no-filter", action="store_true", help="直接发布原始位姿")
+  parser.add_argument(
+      "--frame",
+      choices=("sdk", "fluz"),
+      default="fluz",
+      help="UDP 位姿坐标系：fluz=右手 X前Y左Z上，相对头显（默认）；sdk=Pico 原始相对头显",
+  )
   parser.add_argument("--dry-run", action="store_true", help="不发 UDP，仅打印/统计")
   parser.add_argument("--replay-csv", type=Path, default=None, help="从 pico_record CSV 回放")
   parser.add_argument(
@@ -345,6 +391,7 @@ def main() -> None:
   pos_p = OneEuroParams(args.pos_min_cutoff, args.pos_beta, args.pos_d_cutoff)
   ori_p = OneEuroParams(args.ori_min_cutoff, args.ori_beta, args.ori_d_cutoff)
   use_filter = not args.no_filter
+  use_fluz = args.frame == "fluz"
 
   if args.replay_servo_dir is not None:
     code = run_replay_servo_cart(
@@ -356,11 +403,13 @@ def main() -> None:
     code = run_replay(
         args.replay_csv, args.host, args.port, args.rate, pos_p, ori_p,
         use_filter, args.dry_run, args.loop, args.max_frames, args.max_ticks,
+        use_fluz,
     )
   else:
     code = run_live(
         args.host, args.port, args.rate, pos_p, ori_p,
         use_filter, args.dry_run, args.warmup, args.max_frames, args.max_ticks,
+        use_fluz,
     )
   raise SystemExit(code)
 

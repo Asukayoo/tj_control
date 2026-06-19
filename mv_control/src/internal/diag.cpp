@@ -125,4 +125,45 @@ void EmitMotionError(int arm, const char* motion, const char* reason) {
     std::fflush(stdout);
 }
 
+ServoPicoTrace& ServoPicoTraceGet() {
+    static ServoPicoTrace trace;
+    return trace;
+}
+
+void ServoPicoTraceReset() {
+    ServoPicoTraceGet() = ServoPicoTrace{};
+}
+
+void ServoPicoTraceExport(FILE* f) {
+    if (f == nullptr) {
+        return;
+    }
+    const ServoPicoTrace& t = ServoPicoTraceGet();
+    std::fprintf(f, "\n[servo_pico_trace]\n");
+    for (int i = 0; i < 2; ++i) {
+        const ServoPicoArmTrace& a = t.arm[i];
+        std::fprintf(f, "arm%d api_enter=%llu api_reject=%llu stream_submit=%llu\n", i,
+                     static_cast<unsigned long long>(a.api_enter),
+                     static_cast<unsigned long long>(a.api_reject),
+                     static_cast<unsigned long long>(a.stream_submit));
+        std::fprintf(f,
+                     "arm%d motion_init=%llu session_init=%llu session_fk_fail=%llu "
+                     "replan=%llu\n",
+                     i, static_cast<unsigned long long>(a.motion_init),
+                     static_cast<unsigned long long>(a.session_init),
+                     static_cast<unsigned long long>(a.session_fk_fail),
+                     static_cast<unsigned long long>(a.replan));
+        std::fprintf(f,
+                     "arm%d run_session=%llu run_skip_session=%llu servo_run=%llu "
+                     "servo_skip_init=%llu\n",
+                     i, static_cast<unsigned long long>(a.run_session),
+                     static_cast<unsigned long long>(a.run_skip_session),
+                     static_cast<unsigned long long>(a.servo_run),
+                     static_cast<unsigned long long>(a.servo_skip_init));
+        std::fprintf(f, "arm%d ik_ok=%llu ik_fail=%llu\n", i,
+                     static_cast<unsigned long long>(a.ik_ok),
+                     static_cast<unsigned long long>(a.ik_fail));
+    }
+}
+
 }  // namespace MvDiag

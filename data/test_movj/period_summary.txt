@@ -1,4 +1,4 @@
-raw_period_us: min=see_abnormal max=see_abnormal p50=1000 p99=1065 mean=999.5  in[900,1100]=99.6%  (n=9561, target=1000)
-steady_period_us: p50=1000 p99=1065 mean=1000.1  in[900,1100]=99.6%  (n=9554, catch_up<500us=7)
+raw_period_us: min=see_abnormal max=see_abnormal p50=1000 p99=1052 mean=999.5  in[900,1100]=99.8%  (n=6966, target=1000)
+steady_period_us: p50=1000 p99=1052 mean=999.5  in[900,1100]=99.8%  (n=6966, catch_up<500us=0)
 note: catch_up 为工作超时后 TIMER_ABSTIME 连跳产生的短 period，不代表真实高于 1kHz；稳态 jitter 看 steady 行。
-overrun_us: mean=34.3 max=4594  (work>1ms 会触发 catch_up)
+overrun_us: mean=33.6 max=165  (work>1ms 会触发 catch_up)

@@ -107,10 +107,10 @@ def pico_to_abs_target(
     anchor_pos: np.ndarray,
     anchor_q: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """与 motion.cpp PicoToAbsTarget 一致。"""
-    inv_pos, inv_q = pose_inverse(ref_pico_pos, ref_pico_q)
-    d_pos, d_q = pose_compose(inv_pos, inv_q, pico_pos, pico_q)
-    return pose_compose(anchor_pos, anchor_q, d_pos, d_q)
+    """与 math.hpp PicoToAbsTarget 一致：基座系平移/姿态均左乘。"""
+    out_pos = anchor_pos + (pico_pos - ref_pico_pos)
+    inv_q = normalize_quat(np.array([ref_pico_q[0], -ref_pico_q[1], -ref_pico_q[2], -ref_pico_q[3]]))
+    return out_pos, quat_mul(quat_mul(pico_q, inv_q), anchor_q)
 
 
 def load_pico_txt(path: Path) -> tuple[np.ndarray, np.ndarray]:

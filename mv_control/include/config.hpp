@@ -43,7 +43,7 @@ struct ImpJointConfig {
 };
 
 struct ImpCartConfig {
-    V7d K = (V7d() << 500, 500, 500, 50, 50, 50, 50).finished();
+    V7d K = (V7d() << 500, 500, 500, 50, 50, 50, 20).finished();
     V7d D = V7d::Constant(0.5);
     int rot_type = 2;
     std::array<double, 7> cart_ctrl_para{};

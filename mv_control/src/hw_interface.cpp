@@ -9,15 +9,12 @@
 #include <chrono>
 #include <cmath>
 #include <thread>
-#include <unistd.h>
 
 namespace {
 
 constexpr int kFramePollTries = 5;
-constexpr int kStationaryPollTries = 5;
 constexpr int kSdkSendSleepMs = 10;
-constexpr int kSendSlotStepUs = 20;
-constexpr int kSendSlotTimeoutUs = 500;
+constexpr int kOpenClearRetries = 10;
 
 void SleepMs(int ms) {
     std::this_thread::sleep_for(std::chrono::milliseconds(ms));
@@ -57,19 +54,20 @@ void DecodeArm(HwArmSnapshot& arm, const DCSS& dcss, int idx) {
     }
 }
 
-bool ServoHasError(int arm) {
-    long err[DOF]{};
+// Init 专用：非阻塞清错单次尝试
+bool SendClearErrorBatch(int arm) {
+    if (arm < 0 || arm > 1) {
+        return false;
+    }
+    if (!OnClearSet()) {
+        return false;
+    }
     if (arm == 0) {
-        OnGetServoErr_A(err);
+        OnClearErr_A();
     } else {
-        OnGetServoErr_B(err);
+        OnClearErr_B();
     }
-    for (int i = 0; i < DOF; ++i) {
-        if (err[i] != 0) {
-            return true;
-        }
-    }
-    return false;
+    return OnSetSend();
 }
 
 bool CurrentModeMatches(const DCSS& dcss, int arm, int cur_state, int imp_type) {
@@ -128,7 +126,7 @@ struct IHwBackend {
     virtual bool Read(HwSnapshot& snap) = 0;
     virtual bool Write(const HwWriteRequest& req, HwWriteResult& out) = 0;
     virtual bool ExecuteImmediate(const HwStateCommand& cmd) = 0;
-    virtual bool PrepareDeferredState(HwStateCommand& cmd) = 0;
+    virtual bool PrepareDeferredState(HwStateCommand& cmd, bool is_stationary) = 0;
     virtual void SetSimRefJoints(int arm, const double q_deg[DOF]) = 0;
 
     HwRunSlotStats slot_stats{};
@@ -147,10 +145,15 @@ public:
             return false;
         }
         for (int arm = 0; arm < 2; ++arm) {
-            HwStateCommand clr{};
-            clr.op = HwStateCommand::Op::ClearError;
-            clr.arm = arm;
-            if (!ExecuteImmediate(clr)) {
+            bool cleared = false;
+            for (int i = 0; i < kOpenClearRetries; ++i) {
+                if (SendClearErrorBatch(arm)) {
+                    cleared = true;
+                    break;
+                }
+                SleepMs(1);
+            }
+            if (!cleared) {
                 return false;
             }
         }
@@ -197,15 +200,14 @@ public:
 
     bool Write(const HwWriteRequest& req, HwWriteResult& out) override {
         out = {};
-        const bool want_state = req.left.has_state || req.right.has_state;
-        const bool want_motion = req.left.has_motion || req.right.has_motion;
-        if (!want_state && !want_motion) {
+        const bool want_left = req.left.has_state || req.left.has_stream;
+        const bool want_right = req.right.has_state || req.right.has_stream;
+        if (!want_left && !want_right) {
             return true;
         }
 
-        if (!WaitAndClearSet()) {
-            out.ok = false;
-            return false;
+        if (!TryClearSet()) {
+            return true;  // 发送槽占用，本周期跳过，下周期重试
         }
 
         if (req.left.has_state && !ApplyStateToBatch(req.left.state)) {
@@ -216,30 +218,17 @@ public:
             out.ok = false;
             return false;
         }
-        out.had_state = want_state;
+        out.had_state = req.left.has_state || req.right.has_state;
 
-        if (req.left.has_motion) {
-            double q[DOF];
-            for (int i = 0; i < DOF; ++i) {
-                q[i] = req.left.motion.q_deg[i];
-            }
-            if (!OnSetJointCmdPos_A(q)) {
-                out.ok = false;
-                return false;
-            }
-            out.had_motion = true;
+        if (req.left.has_stream && !ApplyStreamToBatch(0, req.left)) {
+            out.ok = false;
+            return false;
         }
-        if (req.right.has_motion) {
-            double q[DOF];
-            for (int i = 0; i < DOF; ++i) {
-                q[i] = req.right.motion.q_deg[i];
-            }
-            if (!OnSetJointCmdPos_B(q)) {
-                out.ok = false;
-                return false;
-            }
-            out.had_motion = true;
+        if (req.right.has_stream && !ApplyStreamToBatch(1, req.right)) {
+            out.ok = false;
+            return false;
         }
+        out.had_stream = req.left.has_stream || req.right.has_stream;
 
         out.udp_sent = OnSetSend();
         if (!out.udp_sent) {
@@ -250,9 +239,6 @@ public:
     }
 
     bool ExecuteImmediate(const HwStateCommand& cmd) override {
-        if (cmd.op == HwStateCommand::Op::ClearError) {
-            return ClearErrorImmediate(cmd.arm);
-        }
         if (cmd.op == HwStateCommand::Op::EStop) {
             if (cmd.arm == 2) {
                 OnEMG_AB();
@@ -266,15 +252,16 @@ public:
         return false;
     }
 
-    bool PrepareDeferredState(HwStateCommand& cmd) override {
+    bool PrepareDeferredState(HwStateCommand& cmd, bool is_stationary) override {
         if (cmd.arm < 0 || cmd.arm > 1) {
             return false;
         }
-        if (cmd.op == HwStateCommand::Op::Disable) {
+        if (cmd.op == HwStateCommand::Op::Disable ||
+            cmd.op == HwStateCommand::Op::ClearError) {
             return true;
         }
         ClampVelAcc(cmd.vel_percent, cmd.acc_percent);
-        if (!IsStationary(cmd.arm)) {
+        if (!is_stationary) {
             return false;
         }
         DCSS dcss{};
@@ -309,65 +296,25 @@ public:
 private:
     int servo_poll_cnt_ = 0;
 
-    bool WaitAndClearSet() {
-        const auto t0 = std::chrono::steady_clock::now();
-        for (;;) {
-            if (OnClearSet()) {
-                const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-                                         std::chrono::steady_clock::now() - t0)
-                                         .count();
-                slot_stats.wait_total_us += static_cast<uint64_t>(elapsed);
-                if (static_cast<uint64_t>(elapsed) > slot_stats.wait_max_us) {
-                    slot_stats.wait_max_us = static_cast<uint64_t>(elapsed);
-                }
-                return true;
-            }
-            const auto elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
-                                     std::chrono::steady_clock::now() - t0)
-                                     .count();
-            if (elapsed >= kSendSlotTimeoutUs) {
-                ++slot_stats.clear_fail;
-                return false;
-            }
-            usleep(static_cast<useconds_t>(kSendSlotStepUs));
+    bool TryClearSet() {
+        if (OnClearSet()) {
+            return true;
         }
-    }
-
-    bool IsStationary(int arm) {
-        DCSS dcss{};
-        for (int i = 0; i < kStationaryPollTries; ++i) {
-            if (!OnGetBuf(&dcss)) {
-                SleepMs(1);
-                continue;
-            }
-            if (dcss.m_Out[arm].m_LowSpdFlag == 1) {
-                return true;
-            }
-            SleepMs(1);
-        }
+        ++slot_stats.clear_fail;
         return false;
-    }
-
-    bool ClearErrorImmediate(int arm) {
-        if (arm < 0 || arm > 1) {
-            return false;
-        }
-        OnClearSet();
-        if (arm == 0) {
-            OnClearErr_A();
-        } else {
-            OnClearErr_B();
-        }
-        if (!OnSetSend()) {
-            return false;
-        }
-        SleepMs(kSdkSendSleepMs);
-        return !ServoHasError(arm);
     }
 
     bool ApplyStateToBatch(const HwStateCommand& cmd) {
         if (cmd.arm < 0 || cmd.arm > 1) {
             return false;
+        }
+        if (cmd.op == HwStateCommand::Op::ClearError) {
+            if (cmd.arm == 0) {
+                OnClearErr_A();
+            } else if (cmd.arm == 1) {
+                OnClearErr_B();
+            }
+            return true;
         }
         const ArmOps& ops = Ops(cmd.arm);
         switch (cmd.op) {
@@ -455,6 +402,39 @@ private:
                 return false;
         }
     }
+
+    bool ApplyStreamToBatch(int arm, const HwArmWrite& slot) {
+        if (!slot.has_stream) {
+            return true;
+        }
+        const ArmOps& ops = Ops(arm);
+        if (slot.send_imp_kd) {
+            double k[DOF];
+            double d[DOF];
+            for (int i = 0; i < DOF; ++i) {
+                k[i] = slot.imp_kd.k[i];
+                d[i] = slot.imp_kd.d[i];
+            }
+            if (slot.imp_kd.is_cart) {
+                if (!ops.set_cart_kd(k, d, 2)) {
+                    return false;
+                }
+            } else if (!ops.set_joint_kd(k, d)) {
+                return false;
+            }
+        }
+        if (!slot.send_joint) {
+            return true;
+        }
+        double q[DOF];
+        for (int i = 0; i < DOF; ++i) {
+            q[i] = slot.q_deg[i];
+        }
+        if (arm == 0) {
+            return OnSetJointCmdPos_A(q);
+        }
+        return OnSetJointCmdPos_B(q);
+    }
 };
 
 class SimBackend : public IHwBackend {
@@ -487,13 +467,31 @@ public:
             switch (slot.state.op) {
                 case HwStateCommand::Op::Enable:
                 case HwStateCommand::Op::SetPositionMode:
+                    arms_[arm].arm_state = ARM_STATE_POSITION;
+                    arms_[arm].imp_type = 0;
+                    break;
                 case HwStateCommand::Op::SetJointImp:
+                    arms_[arm].arm_state = ARM_STATE_TORQ;
+                    arms_[arm].imp_type = ARM_IMP_JOINT;
+                    break;
                 case HwStateCommand::Op::SetCartImp:
+                    arms_[arm].arm_state = ARM_STATE_TORQ;
+                    arms_[arm].imp_type = ARM_IMP_CART;
+                    break;
                 case HwStateCommand::Op::SetForce:
-                    arms_[arm].arm_state = 1;
+                    arms_[arm].arm_state = ARM_STATE_TORQ;
+                    arms_[arm].imp_type = ARM_IMP_FORCE;
                     break;
                 case HwStateCommand::Op::Disable:
-                    arms_[arm].arm_state = 0;
+                    arms_[arm].arm_state = ARM_STATE_IDLE;
+                    arms_[arm].imp_type = 0;
+                    break;
+                case HwStateCommand::Op::ClearError:
+                    arms_[arm].arm_err_code = 0;
+                    if (arms_[arm].arm_state == ARM_STATE_ERROR) {
+                        arms_[arm].arm_state = 0;
+                    }
+                    arms_[arm].servo_err.fill(0);
                     break;
                 default:
                     break;
@@ -508,24 +506,27 @@ public:
             apply_state(req.right, 1);
             out.had_state = true;
         }
-        if (req.left.has_motion || req.right.has_motion) {
-            out.had_motion = true;
+        if (req.left.has_stream && req.left.send_joint) {
+            for (int i = 0; i < DOF; ++i) {
+                ref_q_deg_[0][i] = req.left.q_deg[i];
+            }
+            has_ref_[0] = true;
+            out.had_stream = true;
+        }
+        if (req.right.has_stream && req.right.send_joint) {
+            for (int i = 0; i < DOF; ++i) {
+                ref_q_deg_[1][i] = req.right.q_deg[i];
+            }
+            has_ref_[1] = true;
+            out.had_stream = true;
+        } else if (req.left.has_stream || req.right.has_stream) {
+            out.had_stream = true;
         }
         out.ok = true;
         return true;
     }
 
     bool ExecuteImmediate(const HwStateCommand& cmd) override {
-        if (cmd.op == HwStateCommand::Op::ClearError) {
-            if (cmd.arm == 0 || cmd.arm == 1) {
-                arms_[cmd.arm].arm_err_code = 0;
-                if (arms_[cmd.arm].arm_state == ARM_STATE_ERROR) {
-                    arms_[cmd.arm].arm_state = 0;
-                }
-                arms_[cmd.arm].servo_err.fill(0);
-            }
-            return true;
-        }
         if (cmd.op == HwStateCommand::Op::EStop) {
             if (cmd.arm == 2) {
                 arms_[0].arm_state = 0;
@@ -538,7 +539,7 @@ public:
         return false;
     }
 
-    bool PrepareDeferredState(HwStateCommand& cmd) override {
+    bool PrepareDeferredState(HwStateCommand& cmd, bool /*is_stationary*/) override {
         (void)cmd;
         return true;
     }
@@ -581,8 +582,8 @@ struct HwInterface::Impl {
     bool ExecuteImmediate(const HwStateCommand& cmd) {
         return backend->ExecuteImmediate(cmd);
     }
-    bool PrepareDeferredState(HwStateCommand& cmd) {
-        return backend->PrepareDeferredState(cmd);
+    bool PrepareDeferredState(HwStateCommand& cmd, bool is_stationary) {
+        return backend->PrepareDeferredState(cmd, is_stationary);
     }
     void SetSimRefJoints(int arm, const double q_deg[DOF]) {
         backend->SetSimRefJoints(arm, q_deg);
@@ -620,8 +621,8 @@ bool HwInterface::ExecuteImmediate(const HwStateCommand& cmd) {
     return impl_->ExecuteImmediate(cmd);
 }
 
-bool HwInterface::PrepareDeferredState(HwStateCommand& cmd) {
-    return impl_->PrepareDeferredState(cmd);
+bool HwInterface::PrepareDeferredState(HwStateCommand& cmd, bool is_stationary) {
+    return impl_->PrepareDeferredState(cmd, is_stationary);
 }
 
 void HwInterface::SetSimRefJoints(int arm, const double q_deg[DOF]) {

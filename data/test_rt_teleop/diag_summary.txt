@@ -1,2 +1,4 @@
-total_events=0
+total_events=2418
 type_counts:
+  arm=0 category=ik motion= reason=kdl_nr count=559
+  arm=1 category=ik motion= reason=kdl_nr count=1859

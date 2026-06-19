@@ -50,7 +50,6 @@ struct Robot::Impl {
 
     ImpConfig imp_config_{};
     std::deque<StateCmdPackage> pending_state_queue_;
-    std::deque<CmdPackage> pending_motion_queue_;
     std::optional<StateCmdPackage> immediate_state_cmd_;
 
     SdkErrorDetail sdk_detail_{};

@@ -1,9 +1,29 @@
-pico_samples=6518
-valid_samples=6517 fresh_samples=6286
-first_valid_cycle=20
+pico_samples=11519
+valid_samples=10400 fresh_samples=10400
+first_valid_cycle=22380
 nan_pose_samples=0
-trigger_ge_0.99_samples=4879
-right_x_span_m=0.741176
+trigger_ge_0.99_samples=6701
+right_x_span_m=0.832361
 
 结论:
-- 位姿有变化且无数值异常：Pico 发布与 C++ 订阅正常；若仿真不动请查 IK/diag_events。
+- 位姿有变化且无数值异常：Pico 发布与 C++ 订阅正常；若仿真不动请查 servo_pico_trace。
+
+[servo_pico_trace]
+arm0 api_enter=1743 api_reject=0 stream_submit=1743
+arm0 motion_init=15 session_init=15 session_fk_fail=0 replan=1743
+arm0 run_session=34860 run_skip_session=0 servo_run=24858 servo_skip_init=10002
+arm0 ik_ok=24299 ik_fail=559
+arm1 api_enter=5475 api_reject=0 stream_submit=5475
+arm1 motion_init=36 session_init=36 session_fk_fail=0 replan=5475
+arm1 run_session=109500 run_skip_session=0 servo_run=75581 servo_skip_init=33919
+arm1 ik_ok=73722 ik_fail=1859
+
+[servo_pico_结论]
+arm0:
+  - 位姿已进入 ServoPByPico：api_enter=1743
+  - 规划成功：session_init=15 replan=1743
+  - IK 成功 24299 次，失败 559 次
+arm1:
+  - 位姿已进入 ServoPByPico：api_enter=5475
+  - 规划成功：session_init=36 replan=5475
+  - IK 成功 73722 次，失败 1859 次

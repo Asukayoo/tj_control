@@ -29,7 +29,6 @@ enum class MotionType {
     MovJ = 4,
     MovL = 5,
     ServoPByPico = 6,
-    PositionServo = 7,  // 位置模式周期关节输出（RunLogic 生成）
 };
 
 enum class StateCmdType {

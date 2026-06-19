@@ -17,11 +17,10 @@ inline void PoseInverse(const Pose& p, Pose& out) {
 
 inline void PicoToAbsTarget(const Pose& ref_pico, const Pose& robot_anchor,
                             const Pose& pico_pose, Pose& out) {
-    alignas(16) Pose inv;
-    alignas(16) Pose delta;
-    PoseInverse(ref_pico, inv);
-    PoseCompose(inv, pico_pose, delta);
-    PoseCompose(robot_anchor, delta, out);
+    // 平移：基座系左乘 Δt（同系 1:1 叠加）
+    out.pos = robot_anchor.pos + (pico_pose.pos - ref_pico.pos);
+    // 姿态：ΔR_world = R_now R_ref^T，左乘到 anchor（与 FLUZ 轴一致）
+    out.quat = (pico_pose.quat * ref_pico.quat.conjugate() * robot_anchor.quat).normalized();
 }
 
 inline V3d QuatLogLocal(const Quat& q0, const Quat& q1) {
@@ -52,5 +51,11 @@ inline Quat QuatExp(const V3d& w) {
 inline void V7dToSdkDeg(const V7d& q, double joints[DOF]) {
     for (int i = 0; i < DOF; ++i) {
         joints[i] = q(i) * R2D;
+    }
+}
+
+inline void V7dToArray(const V7d& src, double dst[DOF]) {
+    for (int i = 0; i < DOF; ++i) {
+        dst[i] = src(i);
     }
 }

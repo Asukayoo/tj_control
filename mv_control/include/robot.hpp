@@ -35,6 +35,7 @@ public:
     void GoHome();
     void MovJ(const V7d& q);
     void MovL(const Pose& pose);
+    // 仅在下使能（Disabled 且 SDK CurState==0）时有效；上使能时按已选模式进入
     bool SetControlMode(ControlMode control_mode);
 
     const RobotState& GetRefState() const;

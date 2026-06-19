@@ -1,5 +1,6 @@
 #include "config.hpp"
 
+#include <algorithm>
 #include <filesystem>
 #include <yaml-cpp/yaml.h>
 
@@ -169,6 +170,12 @@ void ParseImp(const YAML::Node& node, ImpConfig& imp) {
         if (f["fc_adj_lmt"]) {
             imp.force.fc_adj_lmt = f["fc_adj_lmt"].as<double>();
         }
+    }
+    for (int i = 0; i < DOF; ++i) {
+        imp.joint.K(i) = std::max(0.0, imp.joint.K(i));
+        imp.joint.D(i) = std::clamp(imp.joint.D(i), 0.0, 1.0);
+        imp.cart.K(i) = std::max(0.0, imp.cart.K(i));
+        imp.cart.D(i) = std::clamp(imp.cart.D(i), 0.0, 1.0);
     }
 }
 

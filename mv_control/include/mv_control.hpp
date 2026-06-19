@@ -39,10 +39,7 @@ public:
 
 private:
     void _ApplySnapshot(const HwSnapshot& snap, bool track_frame_serial);
-    void _BuildWriteRequest(HwWriteRequest& req);
-    void _QueueMotionIfNeeded(Robot& arm);
-    void _DrainStateForWrite(Robot& arm, HwArmWrite& slot);
-    void _DrainMotionForWrite(Robot& arm, HwArmWrite& slot);
+    void _FillArmWrite(Robot& arm, HwArmWrite& slot);
 
     std::shared_ptr<HwInterface> hw_;
     ConnectConfig connect_cfg_{};

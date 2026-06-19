@@ -1,5 +1,6 @@
 #include "recorder.hpp"
 
+#include "internal/diag.hpp"
 #include "mv_control.hpp"
 
 #include <algorithm>
@@ -488,10 +489,63 @@ bool ExportTeleopDiagReport(const PicoRecorder& pico, const char* dir) {
         std::fprintf(f, "- 订阅已收到并解析 valid 帧，链路基本正常。\n");
     } else if (rx_init && (rx_max - rx_min) > 1e-4) {
         std::fprintf(f,
-                     "- 位姿有变化且无数值异常：Pico 发布与 C++ 订阅正常；若仿真不动请查 IK/diag_events。\n");
+                     "- 位姿有变化且无数值异常：Pico 发布与 C++ 订阅正常；若仿真不动请查 servo_pico_trace。\n");
     } else {
         std::fprintf(f,
                      "- 有 valid 帧但位姿几乎不变：手柄未动或发布侧未更新 SDK 数据。\n");
+    }
+
+    MvDiag::ServoPicoTraceExport(f);
+    const MvDiag::ServoPicoTrace& sp = MvDiag::ServoPicoTraceGet();
+    std::fprintf(f, "\n[servo_pico_结论]\n");
+    for (int arm = 0; arm < 2; ++arm) {
+        const MvDiag::ServoPicoArmTrace& a = sp.arm[arm];
+        std::fprintf(f, "arm%d:\n", arm);
+        if (a.api_enter == 0) {
+            std::fprintf(f, "  - 位姿未进入 ServoPByPico（TickServo 未调用或扳机未达阈值）\n");
+            continue;
+        }
+        std::fprintf(f, "  - 位姿已进入 ServoPByPico：api_enter=%llu\n",
+                     static_cast<unsigned long long>(a.api_enter));
+        if (a.api_reject > 0) {
+            std::fprintf(f,
+                         "  - _CanAcceptCmd 拒绝 %llu 次（未使能/故障态）\n",
+                         static_cast<unsigned long long>(a.api_reject));
+        }
+        if (a.stream_submit == 0) {
+            std::fprintf(f, "  - 未提交 stream（异常：api_enter>0 但 stream_submit=0）\n");
+        }
+        if (a.motion_init == 0) {
+            std::fprintf(f,
+                         "  - 规划未启动：active_motion 未切到 ServoPByPico 或 motion_inited 未触发 InitPlan\n");
+        } else if (a.session_init == 0) {
+            std::fprintf(f,
+                         "  - InitPlan 已调用 %llu 次但 session 未建立（FK 失败=%llu）\n",
+                         static_cast<unsigned long long>(a.motion_init),
+                         static_cast<unsigned long long>(a.session_fk_fail));
+        } else {
+            std::fprintf(f,
+                         "  - 规划成功：session_init=%llu replan=%llu\n",
+                         static_cast<unsigned long long>(a.session_init),
+                         static_cast<unsigned long long>(a.replan));
+        }
+        if (a.run_session == 0 && a.session_init > 0) {
+            std::fprintf(f, "  - session 已建立但 RunPlan 未执行（run_skip_session=%llu）\n",
+                         static_cast<unsigned long long>(a.run_skip_session));
+        }
+        if (a.ik_ok == 0 && a.ik_fail == 0 && a.servo_run > 0) {
+            std::fprintf(f, "  - servo_run=%llu 但无 IK 计数（未到 Solve 或 init_ 为 false）\n",
+                         static_cast<unsigned long long>(a.servo_run));
+        } else if (a.ik_ok > 0) {
+            std::fprintf(f, "  - IK 成功 %llu 次", static_cast<unsigned long long>(a.ik_ok));
+            if (a.ik_fail > 0) {
+                std::fprintf(f, "，失败 %llu 次", static_cast<unsigned long long>(a.ik_fail));
+            }
+            std::fprintf(f, "\n");
+        } else if (a.ik_fail > 0) {
+            std::fprintf(f, "  - IK 全部失败：ik_fail=%llu\n",
+                         static_cast<unsigned long long>(a.ik_fail));
+        }
     }
 
     std::fclose(f);

@@ -1,0 +1,7 @@
+servo_hz=50
+record_hz=50
+joint_udp_hz=1000
+pico_udp_port=30101
+joint_udp_port=30100
+robot_samples=1450
+pico_samples=1450

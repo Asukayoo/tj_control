@@ -173,7 +173,6 @@ bool Robot::_Init(bool is_sim) {
     impl_->control_mode_target_ = ControlMode::Position;
     impl_->control_mode_actual_ = ControlMode::Position;
     impl_->pending_state_queue_.clear();
-    impl_->pending_motion_queue_.clear();
     impl_->immediate_state_cmd_.reset();
     return true;
 }
@@ -225,21 +224,20 @@ bool Robot::SetEnable(EnableMode mode) {
 
     if (impl_->is_sim_) {
         if (mode == EnableMode::Enable) {
-            StateCmdPackage cmd{};
-            cmd.type = StateCmdType::Enable;
-            cmd.vel_percent = impl_->vel_ratio_;
-            cmd.acc_percent = impl_->acc_ratio_;
-            impl_->pending_state_queue_.push_back(cmd);
-            impl_->control_mode_target_ = ControlMode::Position;
+            if (!_CallSdkControlMode(impl_->control_mode_target_)) {
+                impl_->error_code_ = ErrorCode::ModeError;
+                return false;
+            }
             impl_->enable_state_ = EnableState::Enabling;
             impl_->enable_transition_cycles_ = 0;
             return true;
         }
         _ClearMotionCmds();
+        impl_->control_mode_target_ = ControlMode::Position;
+        impl_->control_mode_actual_ = ControlMode::Position;
         StateCmdPackage cmd{};
         cmd.type = StateCmdType::Disable;
         impl_->pending_state_queue_.push_back(cmd);
-        impl_->control_mode_target_ = ControlMode::Position;
         impl_->enable_state_ = EnableState::Disabling;
         impl_->enable_transition_cycles_ = 0;
         return true;
@@ -253,17 +251,16 @@ bool Robot::SetEnable(EnableMode mode) {
     }
 
     if (mode == EnableMode::Enable) {
-        impl_->control_mode_target_ = ControlMode::Position;
         MvDiag::LogVerbose(
             impl_->arm_serial_,
-            "SetEnable(Enable) req: enable_state=%s err=%s sdk_CurState=%d LowSpdFlag=%d",
+            "SetEnable(Enable) mode=%d enable_state=%s err=%s sdk_CurState=%d LowSpdFlag=%d",
+            static_cast<int>(impl_->control_mode_target_),
             EnableStateName(impl_->enable_state_), ErrorCodeName(impl_->error_code_),
             impl_->sdk_detail_.arm_state, impl_->low_spd_flag_);
-        StateCmdPackage cmd{};
-        cmd.type = StateCmdType::Enable;
-        cmd.vel_percent = impl_->vel_ratio_;
-        cmd.acc_percent = impl_->acc_ratio_;
-        impl_->pending_state_queue_.push_back(cmd);
+        if (!_CallSdkControlMode(impl_->control_mode_target_)) {
+            impl_->error_code_ = ErrorCode::ModeError;
+            return false;
+        }
         const EnableState prev_en = impl_->enable_state_;
         impl_->enable_state_ = EnableState::Enabling;
         impl_->enable_transition_cycles_ = 0;
@@ -271,6 +268,7 @@ bool Robot::SetEnable(EnableMode mode) {
     } else {
         _ClearMotionCmds();
         impl_->control_mode_target_ = ControlMode::Position;
+        impl_->control_mode_actual_ = ControlMode::Position;
         StateCmdPackage cmd{};
         cmd.type = StateCmdType::Disable;
         impl_->pending_state_queue_.push_back(cmd);
@@ -298,8 +296,11 @@ void Robot::EStop() {
 void Robot::_UpdateEnableState() {
     const int st = impl_->sdk_detail_.arm_state;
     if (st == 0 || st == 1 || st == 2 || st == 3 || st == 4 || st == 100) {
-        impl_->control_mode_actual_ =
-            MapSdkToControlMode(st, impl_->sdk_detail_.imp_type);
+        // 下使能且 CurState==0：保留 SetControlMode 预设，不从 SDK 覆盖
+        if (!(st == 0 && impl_->enable_state_ == EnableState::Disabled)) {
+            impl_->control_mode_actual_ =
+                MapSdkToControlMode(st, impl_->sdk_detail_.imp_type);
+        }
     }
 
     if (impl_->is_sim_) {
@@ -418,45 +419,17 @@ bool Robot::_CallSdkControlMode(ControlMode mode) {
 }
 
 bool Robot::SetControlMode(ControlMode mode) {
-    impl_->control_mode_target_ = mode;
-    if (impl_->control_mode_actual_ == mode) {
-        return true;
-    }
-
-    if (!impl_->is_sim_) {
-        if (mode != ControlMode::Position &&
-            impl_->sdk_detail_.arm_state == 0 &&
-            impl_->enable_state_ == EnableState::Disabled) {
-            impl_->error_code_ = ErrorCode::EnableError;
-            return false;
-        }
-    }
-
-    if (!_CallSdkControlMode(mode)) {
+    // 安全策略：仅下使能（CurState==0）时允许改模式；实际上切模式在 SetEnable(Enable) 时发 SDK
+    if (impl_->enable_state_ != EnableState::Disabled) {
         impl_->error_code_ = ErrorCode::ModeError;
         return false;
     }
-    if (impl_->is_sim_) {
-        switch (mode) {
-        case ControlMode::Position:
-            impl_->sdk_detail_.arm_state = 1;
-            impl_->sdk_detail_.imp_type = 0;
-            break;
-        case ControlMode::JointImp:
-            impl_->sdk_detail_.arm_state = 3;
-            impl_->sdk_detail_.imp_type = 1;
-            break;
-        case ControlMode::CartImp:
-            impl_->sdk_detail_.arm_state = 3;
-            impl_->sdk_detail_.imp_type = 2;
-            break;
-        case ControlMode::Force:
-            impl_->sdk_detail_.arm_state = 3;
-            impl_->sdk_detail_.imp_type = 3;
-            break;
-        }
-        _UpdateEnableState();
+    if (!impl_->is_sim_ && impl_->sdk_detail_.arm_state != 0) {
+        impl_->error_code_ = ErrorCode::ModeError;
+        return false;
     }
+    impl_->control_mode_target_ = mode;
+    impl_->control_mode_actual_ = mode;
     return true;
 }
 
@@ -658,6 +631,7 @@ void Robot::_RunActiveMotion() {
                 break;
             }
             case MotionType::ServoPByPico:
+                ++MvDiag::ServoPicoTraceGet().arm[impl_->arm_serial_].motion_init;
                 impl_->motion_servop_pico_.InitPlan(impl_->active_cmd_->pose, impl_->ref_rs_,
                                              impl_->ref_rs_.joint_state.q);
                 break;
@@ -916,9 +890,7 @@ void Robot::ServoP(const Pose& pose) {
 }
 
 void Robot::ServoPByPico(const Pose& pose, bool is_run) {
-    if (!_CanAcceptCmd()) {
-        return;
-    }
+    const int arm = impl_->arm_serial_;
     if (!is_run) {
         impl_->stream_cmd_.reset();
         impl_->stream_dirty_ = false;
@@ -930,10 +902,16 @@ void Robot::ServoPByPico(const Pose& pose, bool is_run) {
         }
         return;
     }
+    ++MvDiag::ServoPicoTraceGet().arm[arm].api_enter;
+    if (!_CanAcceptCmd()) {
+        ++MvDiag::ServoPicoTraceGet().arm[arm].api_reject;
+        return;
+    }
     CmdPackage pkg;
     pkg.type = MotionType::ServoPByPico;
     pkg.pose = pose;
     _SubmitStream(MotionType::ServoPByPico, pkg);
+    ++MvDiag::ServoPicoTraceGet().arm[arm].stream_submit;
 }
 
 void Robot::GoWork() { MovJ(impl_->work_q_); }
@@ -985,7 +963,10 @@ bool Robot::ClearError() {
         }
         StateCmdPackage cmd{};
         cmd.type = StateCmdType::ClearError;
-        impl_->immediate_state_cmd_ = cmd;
+        if (impl_->pending_state_queue_.empty() ||
+            impl_->pending_state_queue_.front().type != StateCmdType::ClearError) {
+            impl_->pending_state_queue_.push_front(cmd);
+        }
         return true;
     } else {
         impl_->error_code_ = ErrorCode::Normal;

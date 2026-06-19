@@ -34,6 +34,7 @@ def load_pico_csv(path: str | Path) -> List[Dict[str, Any]]:
               "timestamp_ns": int(row["timestamp_ns"]),
               "right_controller": _row_pose_xyzw(row, "right_ctrl"),
               "left_controller": _row_pose_xyzw(row, "left_ctrl"),
+              "headset": _row_pose_xyzw(row, "headset"),
               "right_trigger": float(row["right_trigger"]),
               "left_trigger": float(row["left_trigger"]),
           }

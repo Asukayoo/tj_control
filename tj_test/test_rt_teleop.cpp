@@ -39,7 +39,8 @@ constexpr int kPicoServoHz = 50;
 constexpr int kPicoServoPeriodCycles = 1000 / kPicoServoHz;
 constexpr int kRecordHz = 50;
 constexpr int kRecordPeriodCycles = 1000 / kRecordHz;
-constexpr float kTriggerThreshold = 0.99f;
+constexpr float kTriggerPressThreshold = 0.99f;    // 按下门限
+constexpr float kTriggerReleaseThreshold = 0.95f;  // 松开迟滞（仅 50Hz 判定）
 constexpr uint32_t kPicoMagic = 0x5049434F;  // "PICO"
 constexpr std::size_t kPicoPktSize = 137;
 constexpr std::size_t kJointPktSize = 14 * sizeof(double);
@@ -68,7 +69,7 @@ struct ArmFlow {
     RtPhase phase = RtPhase::WaitEnable;
     int wait_cnt = 0;
     double ref_q0[DOF]{};
-    bool trigger_was_pressed = false;
+    bool servo_session_active = false;  // 本臂 ServoPByPico session 是否建立
 };
 
 struct PicoState {
@@ -90,6 +91,7 @@ struct RtOptions {
     int pico_port = kDefaultPicoPort;
     int joint_port = kDefaultJointPort;
     int sim = -1;  // -1=交互, 0=hw, 1=sim
+    bool pico_print = false;
 };
 
 bool ParseSimFlag(const char* arg, int& sim) {
@@ -135,6 +137,10 @@ bool ParseOptions(int argc, char** argv, RtOptions& opt) {
                 return false;
             }
             opt.joint_port = std::atoi(argv[++i]);
+            continue;
+        }
+        if (std::strcmp(argv[i], "--pico-print") == 0) {
+            opt.pico_print = true;
             continue;
         }
         if (argv[i][0] == '-' || argv[i][0] == '\0') {
@@ -227,6 +233,29 @@ bool PicoFresh(const PicoState& state) {
     return ms <= kPicoStaleMs;
 }
 
+// 50Hz 打印订阅到的 Pico UDP（与 pico_teleop.csv 字段一致，单位 m + xyzw）
+void PrintPicoSubscribed(int cycle, const PicoState& pico, bool fresh) {
+    if (!pico.valid) {
+        std::fprintf(stderr, "[pico_sub] cycle=%d valid=0 fresh=%d\n", cycle,
+                     fresh ? 1 : 0);
+        return;
+    }
+    const double* r = pico.right_pose_m;
+    const double* l = pico.left_pose_m;
+    std::fprintf(stderr,
+                 "[pico_sub] cycle=%d seq=%u ts=%llu valid=1 fresh=%d "
+                 "R_trig=%.3f L_trig=%.3f\n",
+                 cycle, pico.seq,
+                 static_cast<unsigned long long>(pico.timestamp_ns), fresh ? 1 : 0,
+                 pico.right_trigger, pico.left_trigger);
+    std::fprintf(stderr,
+                 "  R[m] x=%.4f y=%.4f z=%.4f qx=%.4f qy=%.4f qz=%.4f qw=%.4f\n", r[0],
+                 r[1], r[2], r[3], r[4], r[5], r[6]);
+    std::fprintf(stderr,
+                 "  L[m] x=%.4f y=%.4f z=%.4f qx=%.4f qy=%.4f qz=%.4f qw=%.4f\n", l[0],
+                 l[1], l[2], l[3], l[4], l[5], l[6]);
+}
+
 void SnapshotRef(const Robot& arm, ArmFlow& flow) {
     const V7d& q = arm.GetRefState().joint_state.q;
     for (int i = 0; i < DOF; ++i) {
@@ -279,21 +308,37 @@ void IssueDisable(Robot& arm, ArmFlow& flow, int cycle) {
 }
 
 void StopServoIfNeeded(Robot& arm, ArmFlow& flow) {
-    if (flow.trigger_was_pressed) {
+    if (flow.servo_session_active) {
         arm.ServoPByPico(Pose{}, false);
-        flow.trigger_was_pressed = false;
+        flow.servo_session_active = false;
     }
 }
 
-void TickTriggerRelease(Robot& arm, ArmFlow& flow, float trigger, bool teleop_active) {
-    if (!flow.trigger_was_pressed) {
+// 迟滞：session 内用 release 门限，避免 50Hz 采样抖动反复 InitPlan
+bool TriggerHeldForSession(float trigger, bool session_active) {
+    if (session_active) {
+        return trigger >= kTriggerReleaseThreshold;
+    }
+    return trigger >= kTriggerPressThreshold;
+}
+
+// 50Hz 统一 session：首次有效 InitPlan，持续有效 RePlan，松开清空
+void TickServoArmAt50Hz(Robot& arm, ArmFlow& flow, float trigger, const Pose& pose,
+                        bool teleop_active, bool pico_fresh) {
+    if (!teleop_active) {
+        StopServoIfNeeded(arm, flow);
         return;
     }
-    const bool pressed = teleop_active && (trigger >= kTriggerThreshold);
-    if (!pressed) {
-        arm.ServoPByPico(Pose{}, false);
-        flow.trigger_was_pressed = false;
+    if (!pico_fresh) {
+        return;  // 无新 UDP 帧时不误判松开，也不提交新目标
     }
+    const bool held = TriggerHeldForSession(trigger, flow.servo_session_active);
+    if (held) {
+        arm.ServoPByPico(pose, true);
+        flow.servo_session_active = true;
+        return;
+    }
+    StopServoIfNeeded(arm, flow);
 }
 
 void TickServoAt50Hz(Robot& left, Robot& right, ArmFlow& lf, ArmFlow& rf,
@@ -301,17 +346,11 @@ void TickServoAt50Hz(Robot& left, Robot& right, ArmFlow& lf, ArmFlow& rf,
     if (cycle % kPicoServoPeriodCycles != 0) {
         return;
     }
-    if (!teleop_active || !PicoFresh(pico)) {
-        return;
-    }
-    if (pico.right_trigger >= kTriggerThreshold) {
-        right.ServoPByPico(pico.right_pose, true);
-        rf.trigger_was_pressed = true;
-    }
-    if (pico.left_trigger >= kTriggerThreshold) {
-        left.ServoPByPico(pico.left_pose, true);
-        lf.trigger_was_pressed = true;
-    }
+    const bool fresh = PicoFresh(pico);
+    TickServoArmAt50Hz(right, rf, pico.right_trigger, pico.right_pose, teleop_active,
+                       fresh);
+    TickServoArmAt50Hz(left, lf, pico.left_trigger, pico.left_pose, teleop_active,
+                       fresh);
 }
 
 bool PublishJointsUdp(UdpSender& tx, MVControl& ctrl) {
@@ -503,7 +542,8 @@ int main(int argc, char** argv) {
     RtOptions opt;
     if (!ParseOptions(argc, argv, opt)) {
         std::fprintf(stderr, "用法: %s [out_dir] [--sim|--hw] "
-                             "[--pico-port N] [--joint-host H] [--joint-port N]\n",
+                             "[--pico-port N] [--joint-host H] [--joint-port N] "
+                             "[--pico-print]\n",
                      argv[0]);
         return 1;
     }
@@ -573,6 +613,7 @@ int main(int argc, char** argv) {
     diag_recorder.Reserve(50000);
     DiagCapture diag_ctx{&diag_recorder, &cycle};
     MvDiag::SetDiagEventCallback(OnDiagEvent, &diag_ctx);
+    MvDiag::ServoPicoTraceReset();
 
     PeriodicLoop tick(1000);
     const RtThreadOptions rt_opt =
@@ -607,11 +648,6 @@ int main(int argc, char** argv) {
             const bool teleop_active = TeleopReady(left_flow, right_flow);
             TickServoAt50Hz(ctrl.Left(), ctrl.Right(), left_flow, right_flow, pico,
                             teleop_active, cycle);
-            const bool fresh = PicoFresh(pico);
-            const float rt = fresh ? pico.right_trigger : 0.0f;
-            const float lt = fresh ? pico.left_trigger : 0.0f;
-            TickTriggerRelease(ctrl.Right(), right_flow, rt, teleop_active);
-            TickTriggerRelease(ctrl.Left(), left_flow, lt, teleop_active);
 
             ctrl.Run();
 
@@ -631,6 +667,9 @@ int main(int argc, char** argv) {
 
             if (cycle % kRecordPeriodCycles == 0) {
                 const bool pico_fresh = PicoFresh(pico);
+                if (opt.pico_print) {
+                    PrintPicoSubscribed(cycle, pico, pico_fresh);
+                }
                 if (!PushRecordSample(
                         cycle, ctrl, pico, pico_fresh,
                         static_cast<uint8_t>(PackPhase(left_flow, right_flow)), flags,
