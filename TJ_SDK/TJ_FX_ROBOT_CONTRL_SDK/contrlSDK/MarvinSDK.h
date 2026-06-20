@@ -87,9 +87,7 @@ extern "C"
 	FX_DLL_EXPORT long OnGetFloatPara(char paraName[30], double *retValue);
 	// 3 保存参数
 	FX_DLL_EXPORT long OnSavePara();
-	////////////////////////////////////////////////////////////////////////////////////////////////
-	// 自动修正传感器偏置,测试中
-	FX_DLL_EXPORT long OnAutoRectifySensor();
+
 	////////////////////////////////////////////////////////////////////////////////////////////////
 	// 保存数据,该接口后要睡久一点,留够保存数据文件的时间,以防保存出错
 	// 保存采集数据到指定文件，任意保存类型
@@ -133,9 +131,9 @@ extern "C"
 	// 3 设置指定手臂的迪卡尔阻抗参数, 在扭矩模式迪卡尔阻抗模式下,即 OnSetTargetState_A(3) && OnSetImpType_A(2) 下参数才有意义(以左臂为例)
 	// 3.1 设置笛卡尔阻抗的刚度和阻尼参数
 	// 设置左臂笛卡尔阻抗的刚度和阻尼参数，以及阻抗类型（ type=2）
-	FX_DLL_EXPORT bool OnSetCartKD_A(double K[7], double D[7], int type);
+	FX_DLL_EXPORT bool OnSetCartKD_A(double K[7], double D[7], int type = 2);
 	// 设置右臂笛卡尔阻抗的刚度和阻尼参数，以及阻抗类型（ type=2）
-	FX_DLL_EXPORT bool OnSetCartKD_B(double K[7], double D[7], int type);
+	FX_DLL_EXPORT bool OnSetCartKD_B(double K[7], double D[7], int type = 2);
 	// 3.2 设置末端笛卡尔方向的旋转
 	// 自定义设置左臂末端旋转方向fcType=1。 笛卡尔方向：CartCtrlPara前三个参数置为末端基于基座X Y Z顺序的旋转，后四个为保留参数，填0
 	// 设置左臂fcType=2，为系统自动计算末端笛卡尔旋转。 CartCtrlPara全填0
@@ -197,14 +195,24 @@ extern "C"
 	FX_DLL_EXPORT bool OnInitPlnLmt(char *path);
 	FX_DLL_EXPORT bool OnSetPlnJoint_A(double start_joints[7], double stop_joints[7], double vel_ratio, double acc_ratio);
 	FX_DLL_EXPORT bool OnSetPlnJoint_B(double start_joints[7], double stop_joints[7], double vel_ratio, double acc_ratio);
-	FX_DLL_EXPORT bool OnStopPlnJoint_A();
-	FX_DLL_EXPORT bool OnStopPlnJoint_B();
 
 	// 笛卡尔空间PLN方式发送指令
 	FX_DLL_EXPORT void *FX_CPointSet_Create();
 	FX_DLL_EXPORT void FX_CPointSet_Destroy(void *pset);
 	FX_DLL_EXPORT bool OnSetPlnCart_A(void *pset);
 	FX_DLL_EXPORT bool OnSetPlnCart_B(void *pset);
+
+	// 中断规划运行，笛卡尔空间和关节空间都适用
+	FX_DLL_EXPORT bool OnStopPlnJoint_A();
+	FX_DLL_EXPORT bool OnStopPlnJoint_B();
+
+	//// collaboration
+	// 关节空间两个手臂同时规划运行，注意同时开始，不一定同时结束。
+	FX_DLL_EXPORT bool CoRunPlnJoint(double start_joints_A[7], double stop_joints_A[7], double start_joints_B[7], double stop_joints_B[7], double vel_ratio, double acc_ratio);
+	// 笛卡尔空间两个手臂从当前点规划方式运行到目标点，规划点位pset由KinematicsSDK计算接口计算得出。
+	FX_DLL_EXPORT bool CoRunPlnCart(void *pset0, void *pset1);
+	// 同时中断两个手臂的规划运行，笛卡尔空间和关节空间都适用
+	FX_DLL_EXPORT bool CoStopPln();
 
 	// 末端工具通讯用接口//
 	// 清除左臂末端模块的缓存数据

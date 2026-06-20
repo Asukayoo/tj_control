@@ -50,26 +50,27 @@
     注意：请检查SDK_PYTHON下动态库是否为最新编译
 
 ## 1.3 SDK库文件编译
-
     使用自动化编译脚本：
-        master下marvinSDK_windows.bat运行可自动编译C++和python调用的dll文件
-        master下marvinSDK_ubuntu.sh运行可自动编译C++和python调用的so文件
+        master分支下marvinSDK_windows_100343.bat运行可自动编译C++和python调用的dll文件
+        master分支下marvinSDK_ubuntu_100343.sh运行可自动编译C++和python调用的so文件
 
-    手动编译指令：
-
+    手动编译指令 ：   
+    编译c++调用的dll动态库:
         windows下使用MinGW编译dll动态库：
-                控制SDK（contrlSDK）：g++ *.cpp -Wall -O2 -shared -o libMarvinSDK.dll -DBUILDING_DLL -D_WIN32 -DCMPL_WIN -fPIC -static -static-libgcc -static-libstdc++ -lws2_32 -lwinmm
-                运动学SDK(kinematicsSDK)：g++ *.cpp -Wall -O2 -shared -o libKine.dll -DBUILDING_DLL -D_WIN32 -fPIC -static -static-libgcc -static-libstdc++ -lws2_32 -lwinmm
+			控制SDK（contrlSDK100343）：g++ *.cpp -Wall -O2 -shared -o libMarvinSDK.dll -DBUILDING_DLL -D_WIN32 -DCMPL_WIN -fPIC -static -static-libgcc -static-libstdc++ -lws2_32 -lwinmm
+			运动学SDK(kinematicsSDK)：g++ *.cpp -Wall -O2 -shared -o libKine.dll -DBUILDING_DLL -D_WIN32 -fPIC -static -static-libgcc -static-libstdc++ -lws2_32 -lwinmm
         编译的libKine.dll 和 libMarvinSDK.dll 供WINDOWS下python使用
     
+    编译so动态库:
         linux设备编译:
-        控制SDK(contrlSDK)，以下方法均可编译: 
-            1. g++ *.cpp  -Wall -O2 -fPIC -shared -o libMarvinSDK.so -lpthread -lrt -DCMPL_LIN
-            2./contrlSDK/makefile 生成libMarvinSDK.so
-        运动学SDK(kinematicsSDK)，以下方法均可编译: 
-            1. g++ *.cpp  -Wall -O2 -fPIC -shared -o libKine.so -lpthread -lrt 
-            2./kinematicsSDK/makefile 生成libKine.so
-        编译的libKine.so 和 libMarvinSDK.so 供编译机器下的下C++和python使用
+            控制SDK(contrlSDK100343)，以下方法均可编译: 
+                1. g++ *.cpp -Wall -O2 -fPIC -shared -o libMarvinSDK.so -lpthread -lrt -DCMPL_LIN
+                2./contrlSDK100343/makefile 生成libMarvinSDK.so
+            运动学SDK(kinematicsSDK)，以下方法均可编译: 
+                1. g++ *.cpp -Wall -O2 -fPIC -shared -o libKine.so -lpthread -lrt 
+                2./kinematicsSDK/makefile 生成libKine.so
+	    编译的libKine.so 和 libMarvinSDK.so 供编译机器下的下C++和python使用
+
 
 
 # 二、 控制SDK功能接口介绍
@@ -252,27 +253,39 @@
                 }
 
         注意，返回字典包括双臂的数据，A索引0，B索引1 
-        如 读取当前双臂臂的状态和历史关节命令以及获取当前关节角度demo：
-            from fx_robot import Marvin_Robot
-            from structure_data import DCSS
-            import time
-            dcss=DCSS()
-            robot=Marvin_Robot()
-            robot.connect('192.168.1.190')
-            robot.log_switch('1') #全局日志开关
-            robot.local_log_switch('1') # 主要日志
-            time.sleep(1)
+        如：
+            1. 读取当前双臂臂的状态和历史关节命令以及获取当前关节角度demo：
+                from fx_robot import Marvin_Robot
+                from structure_data import DCSS
+                import time
+                dcss=DCSS()
+                robot=Marvin_Robot()
+                robot.connect('192.168.1.190')
+                robot.log_switch('1') #全局日志开关
+                robot.local_log_switch('1') # 主要日志
+                time.sleep(1)
+            
+                sub_data=robot.subscribe(dcss)
+            
+                a_state=sub_data["states"][0]["cur_state"]
+                b_state=sub_data["states"][1]["cur_state"]
+            
+                a_joints_cmd=sub_data["inputs"][0]["joint_cmd_pos"]
+                b_joints_cmd=sub_data["inputs"][1]["joint_cmd_pos"]
+            
+                a_current_joints=sub_data["outputs"][0]["fb_joint_pos"]
+                b_current_joints=sub_data["outputs"][1]["fb_joint_pos"]
+
+            2. 读取当前手臂状态：["states"][0]["cur_state"]的值可以看到左臂：
+                0, //下伺服
+                1, // 位置跟随状态
+                2, // PVT状态
+                3, // 扭矩状态
         
-            sub_data=robot.subscribe(dcss)
-        
-            a_state=sub_data["states"][0]["cur_state"]
-            b_state=sub_data["states"][1]["cur_state"]
-        
-            a_joints_cmd=sub_data["inputs"][0]["joint_cmd_pos"]
-            b_joints_cmd=sub_data["inputs"][1]["joint_cmd_pos"]
-        
-            a_current_joints=sub_data["outputs"][0]["fb_joint_pos"]
-            b_current_joints=sub_data["outputs"][1]["fb_joint_pos"]
+                100, //报错了，请清错
+                101, //正常，切换位置状态瞬间
+                102,//正常，切换pvt状态瞬间
+                103,//正常，切换扭矩状态瞬间
 
 
 ### (7) 配置机器人参数相关(参数名见robot.ini文件)
@@ -624,13 +637,14 @@
 
 ### (20) 位置模式下规划当前点到目标点功能
 
+#### 关节空间规划初始化
     pln_init(self,config_path):
         '''关节空间规划初始化
         :param config_path: 本地机械臂配置文件*.MvKDCfg, 可相对路径.
         :return:
             ture or false
         '''
-
+#### 控制器以规划方式运动到目标关节
     setPln_joint(arm:str,start_joints:list, target_joints:list, velRatio:float,accRatio:float):
         '''位置模式下使用该接口传输目标关节点位，防止通信抖动
         :param arm: 机械手臂ID “A” OR “B”
@@ -641,7 +655,7 @@
         :return:
             ture or false
         '''
-
+#### 控制器以规划方式运动到目标坐标空间
     setPln_Cart(self,arm:str, pset: ctypes.c_void_p) -> bool:
         """位置模式下使用该接口传输目标笛卡尔坐标，防止通信抖动
         :param arm: 机械手臂ID “A” OR “B”
@@ -652,10 +666,46 @@
             ture or false
         """   
 
+#### 中断规划运动，关节空间和笛卡尔空间都适用
     stopRunPln_joint(arm: str):
-        '''停止之前的规划运动，关节空间和笛卡尔空间都适用t
+        '''停止之前的规划运动，关节空间和笛卡尔空间都适用
         :param arm: 机械手臂ID “A” OR “B”
         '''
+#### 协同规划：关节空间两个手臂同时规划运行
+     setPln_joint_AB(self,
+                            start_joints_A: List[float],  # 7个关节角度
+                            stop_joints_A: List[float],
+                            start_joints_B: List[float],
+                            stop_joints_B: List[float],
+                            vel_ratio: float,
+                            acc_ratio: float) -> bool:
+        """
+        关节空间两个手臂同时规划运行（同时开始，不一定同时结束）
+        :param start_joints_A: A臂起始关节角度（7个）
+        :param stop_joints_A: A臂目标关节角度（7个）
+        :param start_joints_B: B臂起始关节角度（7个）
+        :param stop_joints_B: B臂目标关节角度（7个）
+        :param vel_ratio: 速度比例（0~1? 具体由SDK定义）
+        :param acc_ratio: 加速度比例
+        :return: 成功返回True，失败返回False
+        """
+       
+#### 协同规划：坐标空间两个手臂同时规划运行
+    setPln_Cart_AB(self, pset0:ctypes.c_void_p, pset1:ctypes.c_void_p) -> bool:
+        """
+        笛卡尔空间两个手臂从当前点规划方式运行到目标点，
+        规划点位pset由KinematicsSDK计算接口计算得出。
+        :param pset0: 手臂0的点集对象
+        :param pset1: 手臂1的点集对象
+        :return: 成功返回True，失败返回False
+        """
+       
+#### 协同中断规划：同时中断规划运动，关节空间和笛卡尔空间都适用
+    stopPln_AB(self) -> bool:
+        """
+        同时中断两个手臂的规划运行（笛卡尔空间和关节空间都适用）
+        :return: 成功返回True，失败返回False
+        """
 
 # 三、简明式接口介绍
     简明式接口，省略了使用SDK的繁琐用法：必须放在clear_set() 和 send_cmd()之间； 用户连接、切换状态需要自己判断等

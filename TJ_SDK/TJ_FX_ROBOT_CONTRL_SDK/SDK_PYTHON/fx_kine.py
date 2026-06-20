@@ -11,8 +11,9 @@ current_path = os.path.dirname(current_file_path)
 
 logging.basicConfig(format='%(message)s')
 logger = logging.getLogger('debug_printer')
-logger.setLevel(logging.INFO)
-logger.setLevel(logging.DEBUG)
+# logger.setLevel(logging.INFO)
+# logger.setLevel(logging.DEBUG)
+logger.setLevel(100)
 
 class Marvin_Kine:
     def __init__(self):
@@ -27,23 +28,11 @@ class Marvin_Kine:
         self.jacobi = FX_Jacobi()
         self.jacobi_dot = FX_Jacobi()
 
-        self.robot_tag=0
+        self.robot_tag=None
         self._setup_function_prototypes()
 
     def _setup_function_prototypes(self):
         """设置所有C函数的参数类型和返回类型"""
-        # MOVL
-        self.kine.FX_Robot_PLN_MOVL.argtypes = [
-            ctypes.c_long,  # RobotSerial
-            ctypes.POINTER(ctypes.c_double),  # Start_XYZABC (6个double)
-            ctypes.POINTER(ctypes.c_double),  # End_XYZABC (6个double)
-            ctypes.POINTER(ctypes.c_double),  # Ref_Joints (7个double)
-            ctypes.c_double,  # Vel
-            ctypes.c_double,  # ACC
-            ctypes.c_char_p  # OutPutPath
-        ]
-        self.kine.FX_Robot_PLN_MOVL.restype = ctypes.c_bool
-
         # CPointSet
         self.kine.FX_CPointSet_Create.argtypes = []
         self.kine.FX_CPointSet_Create.restype = ctypes.c_void_p
@@ -53,20 +42,20 @@ class Marvin_Kine:
         self.kine.FX_CPointSet_Destroy.restype = None
 
         # CPointSet
-        self.kine.FX_CPointSet_OnInit.argtypes = [ctypes.c_void_p, ctypes.c_long]
+        self.kine.FX_CPointSet_OnInit.argtypes = [ctypes.c_void_p, ctypes.c_int32]
         self.kine.FX_CPointSet_OnInit.restype = ctypes.c_bool
 
         # CPointSet
         self.kine.FX_CPointSet_OnGetPointNum.argtypes = [ctypes.c_void_p]
-        self.kine.FX_CPointSet_OnGetPointNum.restype = ctypes.c_long
+        self.kine.FX_CPointSet_OnGetPointNum.restype = ctypes.c_int32
 
         # CPointSet
-        self.kine.FX_CPointSet_OnGetPoint.argtypes = [ctypes.c_void_p, ctypes.c_long]
+        self.kine.FX_CPointSet_OnGetPoint.argtypes = [ctypes.c_void_p, ctypes.c_int32]
         self.kine.FX_CPointSet_OnGetPoint.restype = ctypes.POINTER(ctypes.c_double)
 
         # MOVLA
         self.kine.FX_Robot_PLN_MOVLA_C.argtypes = [
-            ctypes.c_long,  # RobotSerial
+            ctypes.c_int32,  # RobotSerial
             ctypes.POINTER(ctypes.c_double),  # Start_XYZABC
             ctypes.POINTER(ctypes.c_double),  # End_XYZABC
             ctypes.POINTER(ctypes.c_double),  # Ref_Joints
@@ -76,22 +65,43 @@ class Marvin_Kine:
         ]
         self.kine.FX_Robot_PLN_MOVLA_C.restype = ctypes.c_bool
 
-        # MOVL_KEEPJA
-        self.kine.FX_Robot_PLN_MOVL_KeepJA_C.argtypes = [
-            ctypes.c_long,  # RobotSerial
-            ctypes.POINTER(ctypes.c_double),  # startjoints
-            ctypes.POINTER(ctypes.c_double),  # stopjoints
+        #Multi-Point Motion Planning
+        self.kine.FX_Robot_PLN_Set_MOVL_Start.argtypes = [
+            ctypes.c_int32,  # RobotSerial
+            ctypes.POINTER(ctypes.c_double),  # Ref_Joints (指向7个double)
+            ctypes.POINTER(ctypes.c_double),  # Start_XYZABC (6个double)
+            ctypes.POINTER(ctypes.c_double),  # End_XYZABC (6个double)
+            ctypes.c_double,  # Allow_Range
+            ctypes.c_int32,  # ZSP_Type
+            ctypes.POINTER(ctypes.c_double),  # ZSP_Para (6个double)
             ctypes.c_double,  # Vel
+            ctypes.c_double,  # Acc
+            ctypes.c_int32  # Freq
+        ]
+        self.kine.FX_Robot_PLN_Set_MOVL_Start.restype = ctypes.c_bool
+
+        self.kine.FX_Robot_PLN_Set_MOVL_Next_Point.argtypes=[
+            ctypes.c_int32,  # RobotSerial
+            ctypes.POINTER(ctypes.c_double),  # Next_XYZABC
+            ctypes.c_double,  # Allow_Range
+            ctypes.c_int32,  #ZSP_Type
+            ctypes.POINTER(ctypes.c_double),  # ZSP_Para
+            ctypes.c_double,  # VEL
             ctypes.c_double,  # ACC
+        ]
+        self.kine.FX_Robot_PLN_Set_MOVL_Next_Point.restype = ctypes.c_bool
+
+        self.kine.FX_Robot_PLN_Get_MOVL_Path_C.argtypes = [
+            ctypes.c_int32,  # RobotSerial
             ctypes.c_void_p  # ret_pset
         ]
-        self.kine.FX_Robot_PLN_MOVL_KeepJA_C.restype = ctypes.c_bool
+        self.kine.FX_Robot_PLN_Get_MOVL_Path_C.restype = ctypes.c_bool
 
-        self.kine.FX_LOG_SWITCH.argtypes = [c_long]
+        self.kine.FX_LOG_SWITCH.argtypes = [c_int32]
 
         self.kine.LOADMvCfg.argtypes = [
             c_char_p,  # FX_CHAR* path
-            ctypes.POINTER(c_long * 2),  # FX_INT32L TYPE[2]
+            ctypes.POINTER(c_int32 * 2),  # FX_INT32L TYPE[2]
             ctypes.POINTER((c_double * 3) * 2),  # FX_DOUBLE GRV[2][3]
             ctypes.POINTER(((c_double * 4) * 8) * 2),  # FX_DOUBLE DH[2][8][4]
             ctypes.POINTER(((c_double * 4) * 7) * 2),  # FX_DOUBLE PNVA[2][7][4]
@@ -103,29 +113,29 @@ class Marvin_Kine:
         self.kine.LOADMvCfg.restype = c_bool  # 返回类型FX_BOOL
 
         ''' ini type kine lmt'''
-        self.kine.FX_Robot_Init_Type.argtypes = [c_long, c_long]
+        self.kine.FX_Robot_Init_Type.argtypes = [c_int32, c_int32]
         self.kine.FX_Robot_Init_Type.restype = c_bool
-        self.kine.FX_Robot_Init_Kine.argtypes = [c_long, (c_double * 4) * 8]
+        self.kine.FX_Robot_Init_Kine.argtypes = [c_int32, (c_double * 4) * 8]
         self.kine.FX_Robot_Init_Kine.restype = c_bool
-        self.kine.FX_Robot_Init_Lmt.argtypes = [c_long, (c_double * 4) * 7, (c_double * 3) * 4]
+        self.kine.FX_Robot_Init_Lmt.argtypes = [c_int32, (c_double * 4) * 7, (c_double * 3) * 4]
         self.kine.FX_Robot_Init_Lmt.restype = c_bool
 
-        self.kine.FX_Robot_Tool_Set.argtypes = [c_long, (c_double * 4) * 4]
+        self.kine.FX_Robot_Tool_Set.argtypes = [c_int32, (c_double * 4) * 4]
         self.kine.FX_Robot_Tool_Set.restype = c_bool
 
-        self.kine.FX_Robot_Kine_FK_NSP.argtypes = [c_long,
+        self.kine.FX_Robot_Kine_FK_NSP.argtypes = [c_int32,
                                                    ctypes.POINTER(ctypes.c_double * 7),
                                                    ctypes.POINTER((ctypes.c_double * 4) * 4),
                                                    ctypes.POINTER((ctypes.c_double * 3) * 3)]
         self.kine.FX_Robot_Kine_FK_NSP.restype = c_bool
 
-        self.kine.FX_Robot_Kine_IK.argtypes = [c_long, POINTER(FX_InvKineSolvePara)]
+        self.kine.FX_Robot_Kine_IK.argtypes = [c_int32, POINTER(FX_InvKineSolvePara)]
         self.kine.FX_Robot_Kine_IK.restype = c_bool
 
-        self.kine.FX_Robot_Kine_IK_NSP.argtypes = [c_long, POINTER(FX_InvKineSolvePara)]
+        self.kine.FX_Robot_Kine_IK_NSP.argtypes = [c_int32, POINTER(FX_InvKineSolvePara)]
         self.kine.FX_Robot_Kine_IK_NSP.restype = c_bool
 
-        self.kine.FX_Robot_Kine_Jacb.argtypes = [c_long, c_double * 7, POINTER(FX_Jacobi)]
+        self.kine.FX_Robot_Kine_Jacb.argtypes = [c_int32, c_double * 7, POINTER(FX_Jacobi)]
         self.kine.FX_Robot_Kine_Jacb.restype = c_bool
 
         self.kine.FX_Matrix42XYZABCDEG.argtypes = [(c_double * 4) * 4, c_double * 6]
@@ -134,35 +144,37 @@ class Marvin_Kine:
         self.kine.FX_XYZABC2Matrix4DEG.argtypes = [ctypes.POINTER(ctypes.c_double * 6),
                                      ctypes.POINTER((ctypes.c_double * 4) * 4)]
 
-        self.kine.FX_Robot_CalEndXYZABC.argtypes = [c_double * 6, c_double * 3,c_long, c_double * 3,c_double*6]
+        self.kine.FX_Robot_CalEndXYZABC.argtypes = [c_double * 6, c_double * 3,c_int32, c_double * 3,c_double*6]
         self.kine.FX_Robot_CalEndXYZABC.restype = c_bool
 
-        self.kine.FX_Robot_PLN_MOVL.argtypes=[c_long,c_double*6,c_double*6,c_double*7,c_double,c_double,c_long,c_char_p]
+        self.kine.FX_Robot_PLN_MOVL.argtypes=[c_int32,
+                                              c_double * 6, c_double * 6,c_double * 7,
+                                                c_double,c_double,c_int32,c_char_p]
         self.kine.FX_Robot_PLN_MOVL.restype=c_bool
 
         self.kine.FX_Robot_PLN_MOVLA_C.argtypes = [
-            ctypes.c_int,  # RobotSerial
+            ctypes.c_int32,  # RobotSerial
             ctypes.POINTER(ctypes.c_double),
             ctypes.POINTER(ctypes.c_double),
             ctypes.POINTER(ctypes.c_double),
             ctypes.c_double,
             ctypes.c_double,
-            ctypes.c_int,
+            ctypes.c_int32,
             ctypes.c_void_p
         ]
         self.kine.FX_Robot_PLN_MOVLA_C.restype = ctypes.c_bool
 
-        self.kine.FX_Robot_PLN_MOVL_KeepJ.argtypes = [c_long, c_double * 7, c_double * 7, c_double, c_double, c_long,
+        self.kine.FX_Robot_PLN_MOVL_KeepJ.argtypes = [c_int32, c_double * 7, c_double * 7, c_double, c_double, c_int32,
                                                       c_char_p]
         self.kine.FX_Robot_PLN_MOVL_KeepJ.restype = c_bool
 
         self.kine.FX_Robot_PLN_MOVL_KeepJA_C.argtypes = [
-            ctypes.c_int,
+            ctypes.c_int32,
             ctypes.POINTER(ctypes.c_double),
             ctypes.POINTER(ctypes.c_double),
             ctypes.c_double,
             ctypes.c_double,
-            ctypes.c_int,
+            ctypes.c_int32,
             ctypes.c_void_p
         ]
         self.kine.FX_Robot_PLN_MOVL_KeepJA_C.restype = ctypes.c_bool
@@ -176,10 +188,23 @@ class Marvin_Kine:
         ]
         self.kine.FX_Robot_Iden_LoadDyn.restype = c_int
 
+        self.kine.FX_Robot_PLN_MOV_Target_C.argtypes = [
+        ctypes.c_int32,                     # RobotSerial
+        ctypes.POINTER(ctypes.c_double),    # Start_XYZABC (6个double)
+        ctypes.POINTER(ctypes.c_double),    # End_XYZABC (6个double)
+        ctypes.POINTER(ctypes.c_double),    # Ref_Joints (7个double)
+        ctypes.c_double,                    # Vel
+        ctypes.c_double,                    # ACC
+        ctypes.c_int32,                     # Freq
+        ctypes.c_void_p                     # ret_pset
+        ]
+        self.kine.FX_Robot_PLN_MOV_Target_C.restype = ctypes.c_bool
+
     def create_point_set(self, point_type: int = 6) -> ctypes.c_void_p:
         """创建CPointSet对象"""
         pset = self.kine.FX_CPointSet_Create()
         if pset:
+            # 初始化点集类型，6对应6维数据(x,y,z,a,b,c)
             self.kine.FX_CPointSet_OnInit(pset, point_type)
         return pset
 
@@ -278,7 +303,7 @@ class Marvin_Kine:
         '''
         :param switch: 打印日志开：1；打印日志关：0
         '''
-        switch_ = c_long(switch)
+        switch_ = c_int32(switch)
         self.kine.FX_LOG_SWITCH(switch_)
 
     def load_config(self, arm_type: int, config_path: str):
@@ -296,7 +321,12 @@ class Marvin_Kine:
             raise ValueError("arm_type must be 0 or 1")
         if not os.path.exists(config_path):
             raise ValueError("no config file")
-        TYPE = (c_long * 2)()
+
+        if arm_type==0:
+            self.robot_tag=0
+        if arm_type==1:
+            self.robot_tag=1
+        TYPE = (c_int32 * 2)()
         GRV = ((c_double * 3) * 2)()
         DH = (((c_double * 4) * 8) * 2)()
         PNVA = (((c_double * 4) * 7) * 2)()
@@ -364,8 +394,8 @@ class Marvin_Kine:
                 if len(j67[i]) != 3:
                     raise ValueError("j67  must be 3 columns")
 
-        Serial = ctypes.c_long(self.robot_tag)
-        robot_type_ = c_long(robot_type)
+        Serial = ctypes.c_int32(self.robot_tag)
+        robot_type_ = c_int32(robot_type)
 
         DH = ((c_double * 4) * 8)()
         for i in range(8):
@@ -415,7 +445,7 @@ class Marvin_Kine:
             for i in range(len(tool_mat)):
                 if len(tool_mat[i]) != 4:
                     raise ValueError("tool_mat  must be 4 columns")
-        Serial = ctypes.c_long(self.robot_tag)
+        Serial = ctypes.c_int32(self.robot_tag)
 
         TOOL = ((c_double * 4) * 4)()
         for i in range(4):
@@ -435,9 +465,9 @@ class Marvin_Kine:
         '''移除工具运动学设置
         :return:bool
         '''
-        Serial = ctypes.c_long(self.robot_tag)
+        Serial = ctypes.c_int32(self.robot_tag)
         '''remove tool'''
-        self.kine.FX_Robot_Tool_Rmv.argtypes = [c_long]
+        self.kine.FX_Robot_Tool_Rmv.argtypes = [c_int32]
         self.kine.FX_Robot_Tool_Rmv.restype = c_bool
         success1 = self.kine.FX_Robot_Tool_Rmv(Serial)
         if success1:
@@ -457,17 +487,15 @@ class Marvin_Kine:
         if len(joints) != 7:
             raise ValueError("shape error: fk input joints must be (7,)")
 
-        Serial = ctypes.c_long(self.robot_tag)
-
-        j0, j1, j2, j3, j4, j5, j6 = joints
-        joints_double = (ctypes.c_double * 7)(j0, j1, j2, j3, j4, j5, j6)
+        Serial = ctypes.c_int32(self.robot_tag)
+        joints_double = (ctypes.c_double * 7)(*joints)
         Matrix4x4 = ((ctypes.c_double * 4) * 4)
         pg = Matrix4x4()
         for i in range(4):
             for j in range(4):
                 pg[i][j] = 1.0 if i == j else 0.0
 
-        self.kine.FX_Robot_Kine_FK.argtypes = [c_long,
+        self.kine.FX_Robot_Kine_FK.argtypes = [c_int32,
                                                ctypes.POINTER(ctypes.c_double * 7),
                                                ctypes.POINTER((ctypes.c_double * 4) * 4)]
         self.kine.FX_Robot_Kine_FK.restype = c_bool
@@ -492,9 +520,8 @@ class Marvin_Kine:
 
         if len(joints) != 7:
             raise ValueError("shape error: fk input joints must be (7,)")
-        Serial = ctypes.c_long(self.robot_tag)
-        j0, j1, j2, j3, j4, j5, j6 = joints
-        joints_double = (ctypes.c_double * 7)(j0, j1, j2, j3, j4, j5, j6)
+        Serial = ctypes.c_int32(self.robot_tag)
+        joints_double = (ctypes.c_double * 7)(*joints)
         Matrix4x4 = ((ctypes.c_double * 4) * 4)
         pg = Matrix4x4()
         for i in range(4):
@@ -572,7 +599,7 @@ class Marvin_Kine:
                                 第6关节的值为j6,此时使用公式j7=(a0^2)*j6+ a1*j6+a2  将得到第7个关节的最大限制位置
                                 如果选取的解里面的第7关节小于j7, 则不发生干涉, 本组解可被驱动到达.
         '''
-        Serial = ctypes.c_long(self.robot_tag)
+        Serial = ctypes.c_int32(self.robot_tag)
         self.sp=structure_data
         success = self.kine.FX_Robot_Kine_IK(Serial, byref(self.sp))
         if not success:
@@ -592,7 +619,6 @@ class Marvin_Kine:
             all_joint_list = self.sp.m_OutPut_AllJoint.to_list()
             all_joint_8x8 = convert_to_8x8_matrix(all_joint_list)
             logger.info(f'all ik joints:{all_joint_8x8 }')
-
             return self.sp
 
     def mat4x4_to_mat1x16(self,pose_mat):
@@ -627,7 +653,7 @@ class Marvin_Kine:
         输出：
             成功：True/1; 失败：False/0
         '''
-        Serial = ctypes.c_long(self.robot_tag)
+        Serial = ctypes.c_int32(self.robot_tag)
         self.sp=sturcture_data
         success = self.kine.FX_Robot_Kine_IK_NSP(Serial, byref(self.sp))
         if not success:
@@ -646,11 +672,8 @@ class Marvin_Kine:
         if len(joints) != 7:
             raise ValueError("joints must be (7,)")
 
-        Serial = ctypes.c_long(self.robot_tag)
-
-        joints_double = ctypes.c_double * 7
-        j0, j1, j2, j3, j4, j5, j6 = joints
-        joints_value = joints_double(j0, j1, j2, j3, j4, j5, j6)
+        Serial = ctypes.c_int32(self.robot_tag)
+        joints_value = (ctypes.c_double * 7)(*joints)
 
         example_matrix = [
             [1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -712,8 +735,7 @@ class Marvin_Kine:
         if len(xyzabc) != 6:
             raise ValueError("length of xyzabc must be 6")
 
-        j0, j1, j2, j3, j4, j5 = xyzabc
-        joints_double = (ctypes.c_double * 6)(j0, j1, j2, j3, j4, j5)
+        joints_double = (ctypes.c_double * 6)(*xyzabc)
         Matrix4x4 = ((ctypes.c_double * 4) * 4)
         pg = Matrix4x4()
         for i in range(4):
@@ -790,14 +812,11 @@ class Marvin_Kine:
         if type(rot_type)!=int:
             raise ValueError("rot_type must be (3,)")
 
-        s0, s1, s2, s3, s4, s5 = start_xyzabc
-        start = (ctypes.c_double * 6)(s0, s1, s2, s3, s4, s5)
-        ps0,ps1,ps2=pose_offset
-        pose_off=(ctypes.c_double * 3)(ps0,ps1,ps2)
+        start = (ctypes.c_double * 6)(*start_xyzabc)
+        pose_off=(ctypes.c_double * 3)(*pose_offset)
         angle0,angle1,angle2=angle_param
         angle=(ctypes.c_double * 3)(angle0,angle1,angle2)
-        rot = ctypes.c_long(rot_type)
-
+        rot = ctypes.c_int32(rot_type)
         end_xyzabc = (c_double * 6)(0, 0, 0, 0, 0, 0)
         success = self.kine.FX_Robot_CalEndXYZABC(start,pose_off,rot,angle,end_xyzabc)
 
@@ -827,24 +846,17 @@ class Marvin_Kine:
                 3 movL的特点在于根据提供的起始目标笛卡尔位姿和终止目标笛卡尔位姿规划一段直线路径点，该接口不约束到达终点时的机器人构型。
                 4 一段规划轨迹会分为加速段，匀速段和减速段， 当起点到终点的距离过短时，匀速段的速度和加速度可能达不到设置值，请知悉。
         '''
-        Serial = ctypes.c_long(self.robot_tag)
+        Serial = ctypes.c_int32(self.robot_tag)
 
-        freq=ctypes.c_long(freq_hz)
+        freq=ctypes.c_int32(freq_hz)
 
         path = save_path.encode('utf-8')
         path_char = ctypes.c_char_p(path)
-
-        s0,s1,s2,s3,s4,s5=start_xyzabc
-        start= (ctypes.c_double * 6)( s0,s1,s2,s3,s4,s5)
-
-        e0,e1,e2,e3,e4,e5=end_xyzabc
-        end= (ctypes.c_double * 6)(e0,e1,e2,e3,e4,e5)
-
+        start= (ctypes.c_double * 6)( *start_xyzabc)
+        end= (ctypes.c_double * 6)(*end_xyzabc)
         vel_value=c_double(vel)
         acc_value=c_double(acc)
-
-        j0, j1, j2, j3, j4, j5, j6 = ref_joints
-        joints_vel_value = (c_double * 7)(j0, j1, j2, j3, j4, j5, j6)
+        joints_vel_value = (c_double * 7)(*ref_joints)
 
         success1=self.kine.FX_Robot_PLN_MOVL(Serial,start,end,joints_vel_value,vel_value,acc_value,freq,path_char)
         if success1:
@@ -858,7 +870,7 @@ class Marvin_Kine:
     def movLA(self, start_xyzabc: List[float], end_xyzabc: List[float],
               ref_joints: List[float], vel: float, acc: float,freq_hz:int,
               dimension: int = 7) -> tuple[List[List[float]], ctypes.c_void_p]:
-   
+
         '''直线规划，执行MOVLA规划并返回点集数据(频率500Hz)
         :param start_xyzabc:起始点末端的位置和姿态：xyz平移单位：mm， abc旋转单位：度。
         :param end_xyzabc:结束点末端的位置和姿态：xyz平移单位：mm， abc旋转单位：度。
@@ -872,8 +884,8 @@ class Marvin_Kine:
                 3 movL的特点在于根据提供的起始目标笛卡尔位姿和终止目标笛卡尔位姿规划一段直线路径点，该接口不约束到达终点时的机器人构型。
                 4 一段规划轨迹会分为加速段，匀速段和减速段， 当起点到终点的距离过短时，匀速段的速度和加速度可能达不到设置值，请知悉。
         '''
-        Serial = ctypes.c_long(self.robot_tag)
-        freq = ctypes.c_long(freq_hz)
+        Serial = ctypes.c_int32(self.robot_tag)
+        freq = ctypes.c_int32(freq_hz)
         if len(start_xyzabc) != 6:
             raise ValueError("start_xyzabc must have 6 elements")
         start_array = (ctypes.c_double * 6)(*start_xyzabc)
@@ -884,8 +896,8 @@ class Marvin_Kine:
             raise ValueError("ref_joints must have 7 elements")
         joints_array = (ctypes.c_double * 7)(*ref_joints)
 
-        vel_value = ctypes.c_double(vel)
-        acc_value = ctypes.c_double(acc)
+        vel_arr = ctypes.c_double(vel)
+        acc_arr = ctypes.c_double(acc)
 
         pset = self.create_point_set(dimension)
         if not pset:
@@ -894,11 +906,11 @@ class Marvin_Kine:
         try:
             success = self.kine.FX_Robot_PLN_MOVLA_C(
                 Serial,
-                ctypes.cast(start_array, ctypes.POINTER(ctypes.c_double)),
-                ctypes.cast(end_array, ctypes.POINTER(ctypes.c_double)),
-                ctypes.cast(joints_array, ctypes.POINTER(ctypes.c_double)),
-                vel_value,
-                acc_value,
+                start_array,
+                end_array,
+                joints_array,
+                vel_arr,
+                acc_arr,
                 freq,
                 pset
             )
@@ -913,7 +925,7 @@ class Marvin_Kine:
             raise e
 
 
-    def movL_KeepJ(self,start_joints:list, end_joints:list,vel:float,acc:float,freq_hz:int,save_path):
+    def movL_KeepJ(self,start_joints:list, end_joints:list,vel:float,acc:float,freq_hz:int,save_path)->bool:
         '''直线规划保持关节构型, 规划文件的点位频率50Hz，即每20ms执行一行
 
         :param start_joints:起始点各个关节位置（单位：角度）
@@ -929,22 +941,27 @@ class Marvin_Kine:
                 4 一段规划轨迹会分为加速段，匀速段和减速段， 当起点到终点的距离过短时，匀速段的速度和加速度可能达不到设置值，请知悉。
         '''
 
-        Serial = ctypes.c_long(self.robot_tag)
-        freq = ctypes.c_long(freq_hz)
+        Serial = ctypes.c_int32(self.robot_tag)
+        freq = ctypes.c_int32(freq_hz)
         path = save_path.encode('utf-8')
         path_char = ctypes.c_char_p(path)
 
-        s0,s1,s2,s3,s4,s5,s6=start_joints
-        start= (ctypes.c_double * 7)( s0,s1,s2,s3,s4,s5,s6)
+        start_array = (ctypes.c_double * 7)(*start_joints)
+        end_array = (ctypes.c_double * 7)(*end_joints)
 
-        e0,e1,e2,e3,e4,e5,e6=end_joints
-        end= (ctypes.c_double * 7)(e0,e1,e2,e3,e4,e5,e6)
+        vel_value = ctypes.c_double(vel)
+        acc_value = ctypes.c_double(acc)
 
-        vel_value=c_double(vel)
-        acc_value = c_double(acc)
-
-        success1=self.kine.FX_Robot_PLN_MOVL_KeepJ(Serial,start,end,vel_value,acc_value,freq,path_char)
-        if success1:
+        success = self.kine.FX_Robot_PLN_MOVL_KeepJ(
+            Serial,
+            start_array,
+            end_array,
+            vel_value,
+            acc_value,
+            freq,
+            path_char
+        )
+        if success:
             if os.path.exists(save_path):
                 logger.info(f'Plan MOVL KeepJ successful, PATH saved as :{save_path}')
                 return True
@@ -954,8 +971,8 @@ class Marvin_Kine:
 
     def movL_KeepJA(self, start_joints: List[float], end_joints: List[float],
               vel: float, acc: float,freq_hz:int,
-              dimension: int = 7) -> List[List[float]]:
-        '''直线规划，执行movL_KeepJA规划并返回点集数据(频率500Hz)
+              dimension: int = 7)-> tuple[List[List[float]], ctypes.c_void_p]:
+        '''直线规划，执行movL_KeepJA规划并返回点集数据
 
                :param start_joints:起始点各个关节位置（单位：角度）
                :param end_joints:终点各个关节位置（单位：角度）
@@ -969,15 +986,13 @@ class Marvin_Kine:
                        4 一段规划轨迹会分为加速段，匀速段和减速段， 当起点到终点的距离过短时，匀速段的速度和加速度可能达不到设置值，请知悉。
                '''
 
-        Serial = ctypes.c_long(self.robot_tag)
-        freq = ctypes.c_long(freq_hz)
-        s0, s1, s2, s3, s4, s5, s6 = start_joints
-        start = (ctypes.c_double * 7)(s0, s1, s2, s3, s4, s5, s6)
-        e0, e1, e2, e3, e4, e5, e6 = end_joints
-        end = (ctypes.c_double * 7)(e0, e1, e2, e3, e4, e5, e6)
-        vel_value = c_double(vel)
-        acc_value = c_double(acc)
-        # 创建CPointSet对象
+        Serial = ctypes.c_int32(self.robot_tag)
+        freq = ctypes.c_int32(freq_hz)
+        start_array = (ctypes.c_double * 7)(*start_joints)
+        end_array = (ctypes.c_double * 7)(*end_joints)
+        vel_arr = c_double(vel)
+        acc_arr = c_double(acc)
+
         pset = self.create_point_set(dimension)
         if not pset:
             raise RuntimeError("Failed to create CPointSet object")
@@ -985,23 +1000,187 @@ class Marvin_Kine:
         try:
             success = self.kine.FX_Robot_PLN_MOVL_KeepJA_C(
                 Serial,
-                ctypes.cast(start, ctypes.POINTER(ctypes.c_double)),
-                ctypes.cast(end, ctypes.POINTER(ctypes.c_double)),
-                vel_value,
-                acc_value,
+                start_array,
+                end_array,
+                vel_arr,
+                acc_arr,
                 freq,
                 pset
             )
 
-            if success:
-                data = self.get_point_set_data(pset, dimension)
-                print(f'Plan MOVL_KeepJA successful, got {len(data)} points')
-                return data
-            else:
-                print('Plan MOVL_KeepJA failed!')
-                return []
-        finally:
+            if not success:
+                self.destroy_point_set(pset)
+                return [], None
+            data = self.get_point_set_data(pset, dimension)
+            print(f'Plan movL_KeepJA successful, got {len(data)} points')
+            return data, pset
+        except Exception as e:
             self.destroy_point_set(pset)
+            raise e
+
+    def mov_target(self,
+                start_xyzabc: List[float],   # 6个元素
+                end_xyzabc: List[float],     # 6个元素
+                ref_joints: List[float],     # 7个元素
+                vel: float,
+                acc: float,
+                freq_hz: int,
+                dimension: int = 7) -> tuple[List[List[float]], ctypes.c_void_p]:
+        """点到点规划（直线优先、关节兜底），规划后返回点集数据
+
+        :param start_xyzabc: 起始点位姿 (X, Y, Z, A, B, C) 单位：mm 和 度
+        :param end_xyzabc:   终点位姿 (X, Y, Z, A, B, C)
+        :param ref_joints:   参考关节角 (7个关节，单位：度)
+        :param vel:          速度，单位 mm/s，范围 0.1~1000
+        :param acc:          加速度，单位 mm/s²，范围 0.1~10000
+        :param freq_hz:      规划频率（基频1000Hz，下发频率可能被调整）
+        :return: (点集列表, pset指针) 维度根据实际规划确定
+        """
+        if len(start_xyzabc) != 6 or len(end_xyzabc) != 6 or len(ref_joints) != 7:
+            raise ValueError("start_xyzabc and end_xyzabc must have 6 elements, ref_joints must have 7 elements")
+
+        serial = ctypes.c_int32(self.robot_tag)   
+        freq = ctypes.c_int32(freq_hz)
+
+        start_arr = (ctypes.c_double * 6)(*start_xyzabc)
+        end_arr   = (ctypes.c_double * 6)(*end_xyzabc)
+        ref_arr   = (ctypes.c_double * 7)(*ref_joints)
+
+        vel_val = ctypes.c_double(vel)
+        acc_val = ctypes.c_double(acc)
+
+        pset = self.create_point_set(dimension)   
+        if not pset:
+            raise RuntimeError("Failed to create CPointSet object")
+
+        try:
+            success = self.kine.FX_Robot_PLN_MOV_Target_C(
+                serial,
+                start_arr,
+                end_arr,
+                ref_arr,
+                vel_val,
+                acc_val,
+                freq,
+                pset
+            )
+
+            if not success:
+                self.destroy_point_set(pset)
+                return [], None
+
+            data = self.get_point_set_data(pset, dimension)
+            print(f'Plan MOV_TargetA successful, got {len(data)} points')
+            return data, pset
+
+        except Exception as e:
+            self.destroy_point_set(pset)
+            raise e
+
+    def multi_movL_set_start(self, ref_joints: List[float], start_xyzabc: List[float],
+                             end_xyzabc: List[float], allow_range: float, zsp_type: int,
+                             zsp_para: List[float], vel: float, acc: float, freq: int) -> bool:
+        """设置MOVL直线规划起始段（含起始点、目标点、过渡参数等）
+        :param ref_joints:起始点各个关节位置（单位：角度）
+        :param start_xyzabc:坐标空间的起点
+        :param end_joints:坐标空间的起点终点
+        :param allow_range: 允许改变臂焦的范围
+        :param zsp_type: 是否改变臂角度
+        :param zsp_para: 臂角参数
+        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
+        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为10000 mm/s^2
+        :param freq_hz:设置内部规划频率(注意：基频设置为1000Hz，下发点位频率若不是基频的整数分频，则默认频率为500Hz)
+        :return: 成功返回True，失败返回False
+        """
+        if len(ref_joints) != 7:
+            raise ValueError(f"ref_joints must have 7 elements, got {len(ref_joints)}")
+        if len(start_xyzabc) != 6:
+            raise ValueError(f"start_xyzabc must have 6 elements, got {len(start_xyzabc)}")
+        if len(end_xyzabc) != 6:
+            raise ValueError(f"end_xyzabc must have 6 elements, got {len(end_xyzabc)}")
+        if len(zsp_para) != 6:
+            raise ValueError(f"zsp_para must have 6 elements, got {len(zsp_para)}")
+
+        serial = ctypes.c_int32(self.robot_tag)  # FX_INT32L → c_int32
+        ref_arr = (ctypes.c_double * 7)(*ref_joints)
+        start_arr = (ctypes.c_double * 6)(*start_xyzabc)
+        end_arr = (ctypes.c_double * 6)(*end_xyzabc)
+        allow_val = ctypes.c_double(allow_range)
+        zsp_type_val = ctypes.c_int32(zsp_type)
+        zsp_arr = (ctypes.c_double * 6)(*zsp_para)
+        vel_val = ctypes.c_double(vel)
+        acc_val = ctypes.c_double(acc)
+        freq_val = ctypes.c_int32(freq)
+
+        result = self.kine.FX_Robot_PLN_Set_MOVL_Start(
+            serial, ref_arr, start_arr, end_arr,
+            allow_val, zsp_type_val, zsp_arr,
+            vel_val, acc_val, freq_val
+        )
+        return result
+
+    def multi_movL_next_point(self,
+                                next_xyzabc: List[float],  # 下一个途经点位姿 [6个]
+                                allow_range: float,
+                                zsp_type: int,
+                                zsp_para: List[float],  # 6个过渡参数
+                                vel: float,
+                                acc: float
+                                ) -> bool:
+        """
+        设置MOVL直线规划的中间途经点（需先调用multi_movL_set_start）
+        :param next_xyzabc:坐标空间加点
+        :param allow_range: 允许改变臂焦的范围
+        :param zsp_type: 是否改变臂角度
+        :param zsp_para: 臂角参数
+        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
+        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为10000 mm/s^2
+        :return: 成功返回True，失败返回False
+        """
+        serial = ctypes.c_int32(self.robot_tag)
+        next_arr = (ctypes.c_double * 6)(*next_xyzabc)
+        zsp_arr = (ctypes.c_double * 6)(*zsp_para)
+        zsp_type_arr = ctypes.c_int32(zsp_type)
+        allow_range_arr = ctypes.c_double(allow_range)
+        vel_arr=ctypes.c_double(vel)
+        acc_var=ctypes.c_double(acc)
+
+        success = self.kine.FX_Robot_PLN_Set_MOVL_Next_Point(
+            serial,
+            next_arr,
+            allow_range_arr,
+            zsp_type_arr,
+            zsp_arr,
+            vel_arr,
+            acc_var
+        )
+        return success
+
+    def multi_movL_get_points(self, dimension: int = 7)-> tuple[List[List[float]], ctypes.c_void_p]:
+        """
+        获取已设置的多段MOVL规划路径点集（需先调用multi_movL_set_start和若干multi_movL_next_point）
+        :param dimension: 点集维度，默认为7（关节角度）
+        :return: (data_list, pset) 其中pset是点集句柄（ctypes.c_void_p），
+                 调用者必须在使用完毕后调用 self.destroy_point_set(pset) 释放。
+                 失败时返回 ([], None)
+        """
+        serial = ctypes.c_int32(self.robot_tag)
+        pset = self.create_point_set(dimension)
+        if not pset:
+            raise RuntimeError("Failed to create point set object")
+
+        success = self.kine.FX_Robot_PLN_Get_MOVL_Path_C(
+            serial,
+            ctypes.c_void_p(pset)
+        )
+        if success:
+            data = self.get_point_set_data(pset, dimension)
+            print(f'Get MOVL path successful, got {len(data)} points')
+            return data, pset
+        else:
+            self.destroy_point_set(pset)
+            print('Get MOVL path failed!')
+            return [], None
 
     def identify_tool_dyn(self, robot_type: int, ipath: str):
         '''工具动力学参数辨识
@@ -1011,9 +1190,9 @@ class Marvin_Kine:
             辨识成功，返回一个长度为10的list:
                         m,mcp*3,i*6
             辨识失败，返回错误类型：
-                    ret=1, 计算错误，需重新采集数据计算； 
-                    ret=2,打开采集数据文件错误，须检查采样文件； 
-                    ret=3,配置文件被修改； 
+                    ret=1, 计算错误，需重新采集数据计算；
+                    ret=2,打开采集数据文件错误，须检查采样文件；
+                    ret=3,配置文件被修改；
                     ret=4, 采集时间不够，缺少有效数据
 
         '''
@@ -1078,7 +1257,6 @@ class Marvin_Kine:
             elif ret_int==4:
                 return 'ret=4, 采集时间不够，缺少有效数据'
 
-
 def convert_to_8x8_matrix(flat_list):
     if len(flat_list) != 64:
         raise ValueError("列表必须有64个元素")
@@ -1104,7 +1282,7 @@ def convert_to_8x8_matrix(flat_list):
 
     return matrix_8x8
 
-FX_INT32L = c_long
+FX_INT32L = c_int32
 FX_DOUBLE = c_double
 FX_BOOL = c_bool
 

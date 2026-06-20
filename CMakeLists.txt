@@ -13,7 +13,7 @@ set(TJ_RUNTIME_LIB_DIRS
   "${TJ_ROS_LIB_DIR}"
   "${TJ_ROS_LIB_DIR}/x86_64-linux-gnu"
   "/usr/lib/x86_64-linux-gnu"
-  "${MV_CONTROL_SDK_ROOT}/contrlSDK"
+  "${MV_CONTROL_SDK_ROOT}/contrlSDK100343"
 )
 list(APPEND CMAKE_BUILD_RPATH ${TJ_RUNTIME_LIB_DIRS})
 

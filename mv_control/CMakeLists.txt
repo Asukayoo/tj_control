@@ -19,7 +19,7 @@ target_include_directories(mv_control
     ${CMAKE_CURRENT_SOURCE_DIR}/include
   PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${MV_CONTROL_SDK_ROOT}/contrlSDK
+    ${MV_CONTROL_SDK_ROOT}/contrlSDK100343
 )
 
 target_link_libraries(mv_control
@@ -29,7 +29,7 @@ target_link_libraries(mv_control
 
 find_library(MARVIN_SDK MarvinSDK
   PATHS
-    ${MV_CONTROL_SDK_ROOT}/contrlSDK
+    ${MV_CONTROL_SDK_ROOT}/contrlSDK100343
     ${MV_CONTROL_SDK_ROOT}/DEMO_C++
   NO_DEFAULT_PATH
 )

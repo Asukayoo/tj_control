@@ -19,6 +19,7 @@ struct HwArmSnapshot {
     bool is_transition = false;
     double joint_pos_deg[DOF]{};
     double joint_vel_deg[DOF]{};
+    double joint_tau_nm[DOF]{};  // m_Out.m_FB_Joint_SToq，Nm
     std::array<long, DOF> servo_err{};
     bool servo_err_fresh = false;
 };

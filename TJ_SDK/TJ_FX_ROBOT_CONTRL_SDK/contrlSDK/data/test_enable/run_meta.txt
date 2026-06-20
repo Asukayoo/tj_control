@@ -1,2 +1,0 @@
-# test_enable: cycle0 SetEnableAll → Run×10 → SetDisableAll → Run
-# columns: cycle phase arm enable_state status error sdk_state mode

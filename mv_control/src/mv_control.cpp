@@ -292,9 +292,11 @@ void MVControl::_ApplySnapshot(const HwSnapshot& snap, bool track_frame_serial) 
         rs.joint_state.v.setZero();
         rs.joint_state.a.setZero();
         rs.joint_state.j.setZero();
+        rs.joint_state.tau.setZero();
         for (int j = 0; j < DOF; ++j) {
             rs.joint_state.q(j) = hw_arms[i]->joint_pos_deg[j] * D2R;
             rs.joint_state.v(j) = hw_arms[i]->joint_vel_deg[j] * D2R;
+            rs.joint_state.tau(j) = hw_arms[i]->joint_tau_nm[j];
         }
         arms[i]->_SetRespState(rs);
         arms[i]->impl_->sdk_detail_.arm_state = hw_arms[i]->arm_state;

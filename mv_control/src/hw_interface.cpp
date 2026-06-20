@@ -51,6 +51,7 @@ void DecodeArm(HwArmSnapshot& arm, const DCSS& dcss, int idx) {
     for (int i = 0; i < DOF; ++i) {
         arm.joint_pos_deg[i] = dcss.m_Out[idx].m_FB_Joint_Pos[i];
         arm.joint_vel_deg[i] = dcss.m_Out[idx].m_FB_Joint_Vel[i];
+        arm.joint_tau_nm[i] = dcss.m_Out[idx].m_FB_Joint_SToq[i];
     }
 }
 

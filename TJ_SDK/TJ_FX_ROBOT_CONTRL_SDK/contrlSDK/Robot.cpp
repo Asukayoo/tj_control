@@ -310,12 +310,12 @@ CRobot::CRobot()
 	pDDSS2->m_Serial = 1;
 	pDDSS2->m_CH = 2;
 #ifdef _WIN32
-	char shm_name[] = "AAA";
+	char shm_name[] = "AAA"; // Windows
 #else
-	char shm_name[] = "/var/tmp/AAA_shm";
+	char shm_name[] = "/var/tmp/AAA_shm"; // 在/var/tmp创建文件（重启后保留）
 #endif
 	ShmOnInit(&m_ShMem);
-
+// Windows 下检查共享内存是否存在
 #ifdef _WIN32
 	printf("Checking Windows shared memory: %s\n", shm_name);
 	HANDLE hMapFile = OpenFileMappingA(
@@ -329,6 +329,7 @@ CRobot::CRobot()
 	else
 	{
 		DWORD err = GetLastError();
+		printf("GetLastError returned %lu\n", err);
 		if (err == ERROR_FILE_NOT_FOUND)
 		{
 			printf("Shared memory %s does not exist (error: %lu), will be created\n", shm_name, err);
@@ -339,6 +340,7 @@ CRobot::CRobot()
 		}
 	}
 #else
+	// Linux下使用传统文件方式创建共享内存
 	printf("Checking Linux file-based shared memory: %s\n", shm_name);
 	FILE *fp = fopen(shm_name, "rb");
 	if (fp != NULL)
@@ -375,32 +377,64 @@ CRobot::CRobot()
 	}
 	printf("  /var/tmp/ directory permissions:\n");
 	system("ls -ld /var/tmp/");
-	if (!m_ShMem.OnMapMster(&m_ShMem, shm_name, 102400))
-	{
-		m_ShMem.OnMapSlave(&m_ShMem, shm_name);
-	}
 #endif
-#ifndef _WIN32
-	m_psm = m_ShMem.OnGetMem(&m_ShMem);
-	if (m_psm == NULL)
-	{
-		printf("Map ShMem Err - m_psm is NULL\n");
-	}
-	else
-	{
-		printf("Map ShMem success - m_psm = %p\n", m_psm);
-	}
-#else
+	(void)m_ShMem.OnMapMster(&m_ShMem, shm_name, 102400);
 	m_psm = m_ShMem.OnGetMem(&m_ShMem);
 	if (m_psm == NULL)
 	{
 		printf("Map Master Err - m_psm is NULL\n");
+#ifdef _WIN32
+		DWORD err = GetLastError();
+		printf("  Windows Error Code: %lu\n", err);
+#else
+		char cmd[256];
+		snprintf(cmd, sizeof(cmd), "ls -la %s 2>/dev/null || echo '  File not found'", shm_name);
+		system(cmd);
+		int fd = open(shm_name, O_RDWR);
+		if (fd != -1)
+		{
+			void *test_map = mmap(NULL, 102400, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+			if (test_map != MAP_FAILED)
+			{
+				munmap(test_map, 102400);
+			}
+			else
+			{
+				printf("    Direct mmap failed, errno: %d (%s)\n", errno, strerror(errno));
+			}
+			close(fd);
+		}
+		else
+		{
+			printf("    Failed to open file, errno: %d (%s)\n", errno, strerror(errno));
+		}
+#endif
+		(void)m_ShMem.OnMapSlave(&m_ShMem, shm_name);
+		m_psm = m_ShMem.OnGetMem(&m_ShMem);
+		if (m_psm == NULL)
+		{
+			printf("Map Slave Err - m_psm is NULL\n");
+#ifdef _WIN32
+			DWORD err = GetLastError();
+			printf("  Windows Error Code: %lu\n", err);
+			printf("  Checking if Global\\ path requires admin privileges\n");
+#else
+			printf("  errno: %d (%s)\n", errno, strerror(errno));
+			printf("  Checking file existence:\n");
+			char cmd[256];
+			snprintf(cmd, sizeof(cmd), "ls -la %s 2>/dev/null || echo '  File not found'", shm_name);
+			system(cmd);
+#endif
+		}
+		else
+		{
+			printf("Map Slave success - m_psm = %p\n", m_psm);
+		}
 	}
 	else
 	{
 		printf("Map Master success - m_psm = %p\n", m_psm);
 	}
-#endif
 	if (m_psm != NULL)
 	{
 		m_ACB_ShMem.OnSetBuf(m_psm, 102400);
@@ -1002,7 +1036,7 @@ void CRobot::DoCnt()
 			m_respones_time_cnt = 0;
 		}
 		m_send_response_timeout_cnt--;
-		m_last_response_timeout_cnt = m_send_response_timeout_cnt;
+		m_last_response_timeout_cnt = m_send_response_timeout_cnt.load();
 		if (m_send_response_local_tag != m_send_response_recv_tag)
 		{
 			m_respones_time_cnt++;
@@ -1038,10 +1072,7 @@ void CRobot::DoRecv()
 		{
 			if (recvbuf[0] == 'F' && recvbuf[1] == 'X')
 			{
-				if (m_psm != NULL)
-				{
-					m_ACB_ShMem.WriteBuf((unsigned char *)recvbuf, Len);
-				}
+				m_ACB_ShMem.WriteBuf((unsigned char *)recvbuf, Len);
 				DCSS *p = (DCSS *)&recvbuf[2];
 				memcpy(&m_DCSS, p, sizeof(m_DCSS));
 				m_send_response_recv_tag = m_DCSS.m_Out[0].m_pad[0];
@@ -1116,8 +1147,7 @@ void CRobot::DoSend()
 {
 	if (m_SendTag == 100)
 	{
-		sendto(_tosock_, (char *)m_SendBuf, m_Slen, 0, (struct sockaddr *)&_to,
-		       sizeof(_to));
+		(void)sendto(_tosock_, (char *)m_SendBuf, m_Slen, 0, (struct sockaddr *)&_to, sizeof(_to));
 		m_SendTag = 0;
 		m_Slen = 0;
 	}
@@ -1609,19 +1639,22 @@ bool CRobot::OnSetPlnCart_A(CPointSet *pset)
 	long num = pset->OnGetPointNum();
 	if (num <= 5)
 	{
+		printf("[ERROR] OnSetPlnCart_A: there are fewer than 5 planned points, cannot operate \n");
 		return false;
 	}
 	CRobot::OnClearSet();
 	CRobot::OnSetTrajInit_A(num);
 	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
 	{
+		printf("[ERROR] OnSetTrajInit_A: OnSetSendWaitResponse timeout\n");
 		return false;
 	}
-	SLEEP(SLEEP_TIME);
+	SLEEP(20);
 	if (CRobot::OnGetBuf(&t) == true)
 	{
 		if (t.m_Out[0].m_TrajState != 1)
 		{
+			printf("[ERROR] OnSetTrajInit_A: The controller has not entered planning mode\n");
 			return false;
 		}
 	}
@@ -1649,6 +1682,7 @@ bool CRobot::OnSetPlnCart_A(CPointSet *pset)
 		CRobot::OnSetTrajSet_A(ii, 50, SendData);
 		if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
 		{
+			printf("[ERROR] OnSetTrajSet_A: OnSetSendWaitResponse timeout\n");
 			return false;
 		}
 	}
@@ -1669,13 +1703,16 @@ bool CRobot::OnSetPlnCart_A(CPointSet *pset)
 		CRobot::OnSetTrajSet_A(send_g_num, relic_num, SendData);
 		if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
 		{
+			printf("[ERROR] OnSetTrajSet_A: OnSetSendWaitResponse timeout\n");
 			return false;
 		}
 	}
+	SLEEP(20);
 	if (CRobot::OnGetBuf(&t) == true)
 	{
 		if (t.m_Out[0].m_TrajState != 2)
 		{
+			printf("[ERROR] OnSetTrajSet_A: The controller did not receive the sent trajectory\n");
 			return false;
 		}
 	}
@@ -1683,6 +1720,7 @@ bool CRobot::OnSetPlnCart_A(CPointSet *pset)
 	CRobot::OnSetTrajRun_A();
 	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
 	{
+		printf("[ERROR] OnSetTrajRun_A: OnSetSendWaitResponse timeout\n");
 		return false;
 	}
 	return true;
@@ -1712,19 +1750,22 @@ bool CRobot::OnSetPlnJoint_A(double start_joints[7], double stop_joints[7], doub
 	long num = m_InsRobot->pln_A.OnPln(sta, sto, vr, ar);
 	if (num <= 0)
 	{
+		printf("[ERROR] OnSetPlnJoint_A: planning failed, please check start joints and end joints\n");
 		return false;
 	}
 	CRobot::OnClearSet();
 	CRobot::OnSetTrajInit_A(num);
 	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
 	{
+		printf("[ERROR] OnSetPlnJoint_A: OnSetSendWaitResponse timeout");
 		return false;
 	}
-	SLEEP(1000);
+	SLEEP(20);
 	if (CRobot::OnGetBuf(&t) == true)
 	{
 		if (t.m_Out[0].m_TrajState != 1)
 		{
+			printf("[ERROR] OnSetTrajInit_A: The controller has not entered planning mode\n");
 			return false;
 		}
 	}
@@ -1750,6 +1791,7 @@ bool CRobot::OnSetPlnJoint_A(double start_joints[7], double stop_joints[7], doub
 		CRobot::OnSetTrajSet_A(ii, 50, SendData);
 		if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
 		{
+			printf("[ERROR] OnSetTrajSet_A: OnSetSendWaitResponse timeout");
 			return false;
 		}
 	}
@@ -1769,13 +1811,16 @@ bool CRobot::OnSetPlnJoint_A(double start_joints[7], double stop_joints[7], doub
 		CRobot::OnSetTrajSet_A(send_g_num, relic_num, SendData);
 		if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
 		{
+			printf("[ERROR] OnSetTrajSet_A: OnSetSendWaitResponse timeout");
 			return false;
 		}
 	}
+	SLEEP(20);
 	if (CRobot::OnGetBuf(&t) == true)
 	{
 		if (t.m_Out[0].m_TrajState != 2)
 		{
+			printf("[ERROR] OnSetTrajSet_A: The controller did not receive the sent trajectory\n");
 			return false;
 		}
 	}
@@ -1783,6 +1828,7 @@ bool CRobot::OnSetPlnJoint_A(double start_joints[7], double stop_joints[7], doub
 	CRobot::OnSetTrajRun_A();
 	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
 	{
+		printf("[ERROR] OnSetTrajRun_A: OnSetSendWaitResponse timeout");
 		return false;
 	}
 	return true;
@@ -1838,6 +1884,7 @@ bool CRobot::OnStopPlnJoint_A()
 	CRobot::OnStopPlnJoint_interA();
 	if (CRobot::OnSetSendWaitResponse(50) < 0)
 	{
+		printf("[ERROR] OnStopPlnJoint_interA: OnSetSendWaitResponse timeout\n");
 		return false;
 	}
 	else
@@ -2496,18 +2543,22 @@ bool CRobot::OnSetPlnCart_B(CPointSet *pset)
 	long num = pset->OnGetPointNum();
 	if (num <= 5)
 	{
+		printf("[ERROR] OnSetPlnCart_B: there are fewer than 5 planned points, cannot operate \n");
 		return false;
 	}
 	CRobot::OnClearSet();
 	CRobot::OnSetTrajInit_B(num);
 	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
 	{
+		printf("[ERROR] OnSetTrajInit_B: OnSetSendWaitResponse timeout\n");
 		return false;
 	}
+	SLEEP(20);
 	if (CRobot::OnGetBuf(&t) == true)
 	{
 		if (t.m_Out[1].m_TrajState != 1)
 		{
+			printf("[ERROR] OnSetTrajInit_B: The controller has not entered planning mode\n");
 			return false;
 		}
 	}
@@ -2535,6 +2586,7 @@ bool CRobot::OnSetPlnCart_B(CPointSet *pset)
 		CRobot::OnSetTrajSet_B(ii, 50, SendData);
 		if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
 		{
+			printf("[ERROR] OnSetTrajSet_B: OnSetSendWaitResponse timeout\n");
 			return false;
 		}
 	}
@@ -2555,13 +2607,16 @@ bool CRobot::OnSetPlnCart_B(CPointSet *pset)
 		CRobot::OnSetTrajSet_B(send_g_num, relic_num, SendData);
 		if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
 		{
+			printf("[ERROR] OnSetTrajSet_B: OnSetSendWaitResponse timeout\n");
 			return false;
 		}
 	}
+	SLEEP(20);
 	if (CRobot::OnGetBuf(&t) == true)
 	{
 		if (t.m_Out[1].m_TrajState != 2)
 		{
+			printf("[ERROR] OnSetTrajSet_B: The controller did not receive the sent trajectory\n");
 			return false;
 		}
 	}
@@ -2569,6 +2624,7 @@ bool CRobot::OnSetPlnCart_B(CPointSet *pset)
 	CRobot::OnSetTrajRun_B();
 	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
 	{
+		printf("[ERROR] OnSetTrajRun_B: OnSetSendWaitResponse timeout\n");
 		return false;
 	}
 	return true;
@@ -2599,18 +2655,22 @@ bool CRobot::OnSetPlnJoint_B(double start_joints[7], double stop_joints[7], doub
 	long num = m_InsRobot->pln_B.OnPln(sta, sto, vr, ar);
 	if (num <= 0)
 	{
+		printf("[ERROR] OnSetPlnJoint_B: planning failed, please check start joints and end joints\n");
 		return false;
 	}
 	CRobot::OnClearSet();
 	CRobot::OnSetTrajInit_B(num);
 	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
 	{
+		printf("[ERROR] OnSetPlnJoint_B: OnSetSendWaitResponse timeout\n");
 		return false;
 	}
+	SLEEP(20);
 	if (CRobot::OnGetBuf(&t) == true)
 	{
 		if (t.m_Out[1].m_TrajState != 1)
 		{
+			printf("[ERROR] OnSetTrajInit_B: The controller has not entered planning mode\n");
 			return false;
 		}
 	}
@@ -2637,6 +2697,7 @@ bool CRobot::OnSetPlnJoint_B(double start_joints[7], double stop_joints[7], doub
 		CRobot::OnSetTrajSet_B(ii, 50, SendData);
 		if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
 		{
+			printf("[ERROR] OnSetTrajSet_B: OnSetSendWaitResponse timeout\n");
 			return false;
 		}
 	}
@@ -2656,13 +2717,16 @@ bool CRobot::OnSetPlnJoint_B(double start_joints[7], double stop_joints[7], doub
 		CRobot::OnSetTrajSet_B(send_g_num, relic_num, SendData);
 		if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
 		{
+			printf("[ERROR] OnSetTrajSet_B: OnSetSendWaitResponse timeout\n");
 			return false;
 		}
 	}
+	SLEEP(20);
 	if (CRobot::OnGetBuf(&t) == true)
 	{
 		if (t.m_Out[1].m_TrajState != 2)
 		{
+			printf("[ERROR] OnSetTrajSet_B: The controller did not receive the sent trajectory\n");
 			return false;
 		}
 	}
@@ -2670,6 +2734,191 @@ bool CRobot::OnSetPlnJoint_B(double start_joints[7], double stop_joints[7], doub
 	CRobot::OnSetTrajRun_B();
 	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
 	{
+		printf("[ERROR] OnSetTrajRun_B: OnSetSendWaitResponse timeout\n");
+		return false;
+	}
+	return true;
+}
+
+bool CRobot::OnSetPlnJoint_AB(double start_joints_A[7], double stop_joints_A[7], double start_joints_B[7], double stop_joints_B[7], double vel_ratio, double acc_ratio)
+{
+	DCSS t;
+	double vr = vel_ratio;
+	double ar = acc_ratio;
+	if (vr < 0.01)
+		vr = 0.01;
+	if (vr > 1.0)
+		vr = 1.0;
+	if (ar < 0.01)
+		ar = 0.01;
+	if (ar > 1.0)
+		ar = 1.0;
+	long i = 0;
+	double sta0[8] = {0};
+	double sto0[8] = {0};
+	double sta1[8] = {0};
+	double sto1[8] = {0};
+	for (i = 0; i < 7; i++)
+	{
+		sta0[i] = start_joints_A[i];
+		sto0[i] = stop_joints_A[i];
+		sta1[i] = start_joints_B[i];
+		sto1[i] = stop_joints_B[i];
+	}
+	long num0 = m_InsRobot->pln_A.OnPln(sta0, sto0, vr, ar);
+	if (num0 <= 0)
+	{
+		printf("[ERROR] OnSetPlnJoint_AB: A planning failed, please check start joints and end joints\n");
+		return false;
+	}
+	CRobot::OnClearSet();
+	CRobot::OnSetTrajInit_A(num0);
+	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
+	{
+		printf("[ERROR] OnSetPlnJoint_AB: A OnSetSendWaitResponse timeout");
+		return false;
+	}
+	SLEEP(20);
+	if (CRobot::OnGetBuf(&t) == true)
+	{
+		if (t.m_Out[0].m_TrajState != 1)
+		{
+			printf("[ERROR] OnSetPlnJoint_AB: The controller has not entered planning mode\n");
+			return false;
+		}
+	}
+	long send_g_num = num0 / 50;
+	long relic_num = num0 % 50;
+	long ii, jj, kk;
+	double SendData[350];
+	double retp[8];
+	long spos;
+	for (ii = 0; ii < send_g_num; ii++)
+	{
+		spos = 0;
+		for (jj = 0; jj < 50; jj++)
+		{
+			m_InsRobot->pln_A.OnCut(retp);
+			for (kk = 0; kk < 7; kk++)
+			{
+				SendData[spos] = retp[kk];
+				spos++;
+			}
+		}
+		CRobot::OnClearSet();
+		CRobot::OnSetTrajSet_A(ii, 50, SendData);
+		if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
+		{
+			printf("[ERROR] OnSetPlnJoint_AB: A OnSetSendWaitResponse timeout");
+			return false;
+		}
+	}
+	if (relic_num != 0)
+	{
+		spos = 0;
+		for (jj = 0; jj < relic_num; jj++)
+		{
+			m_InsRobot->pln_A.OnCut(retp);
+			for (kk = 0; kk < 7; kk++)
+			{
+				SendData[spos] = retp[kk];
+				spos++;
+			}
+		}
+		CRobot::OnClearSet();
+		CRobot::OnSetTrajSet_A(send_g_num, relic_num, SendData);
+		if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
+		{
+			printf("[ERROR] OnSetPlnJoint_AB: A OnSetSendWaitResponse timeout");
+			return false;
+		}
+	}
+
+	long num1 = m_InsRobot->pln_B.OnPln(sta1, sto1, vr, ar);
+	if (num1 <= 0)
+	{
+		printf("[ERROR] OnSetPlnJoint_AB: B planning failed, please check start joints and end joints\n");
+		return false;
+	}
+	CRobot::OnClearSet();
+	CRobot::OnSetTrajInit_B(num1);
+	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
+	{
+		printf("[ERROR] OnSetPlnJoint_AB: B OnSetSendWaitResponse timeout\n");
+		return false;
+	}
+	SLEEP(20);
+	if (CRobot::OnGetBuf(&t) == true)
+	{
+		if (t.m_Out[1].m_TrajState != 1)
+		{
+			printf("[ERROR] OnSetPlnJoint_AB: The controller has not entered planning mode\n");
+			return false;
+		}
+	}
+
+	send_g_num = num1 / 50;
+	relic_num = num1 % 50;
+	for (ii = 0; ii < send_g_num; ii++)
+	{
+		spos = 0;
+		for (jj = 0; jj < 50; jj++)
+		{
+			m_InsRobot->pln_B.OnCut(retp);
+			for (kk = 0; kk < 7; kk++)
+			{
+				SendData[spos] = retp[kk];
+				spos++;
+			}
+		}
+		CRobot::OnClearSet();
+		CRobot::OnSetTrajSet_B(ii, 50, SendData);
+		if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
+		{
+			printf("[ERROR] OnSetPlnJoint_AB: B OnSetSendWaitResponse timeout\n");
+			return false;
+		}
+	}
+	if (relic_num != 0)
+	{
+		spos = 0;
+		for (jj = 0; jj < relic_num; jj++)
+		{
+			m_InsRobot->pln_B.OnCut(retp);
+			for (kk = 0; kk < 7; kk++)
+			{
+				SendData[spos] = retp[kk];
+				spos++;
+			}
+		}
+		CRobot::OnClearSet();
+		CRobot::OnSetTrajSet_B(send_g_num, relic_num, SendData);
+		if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
+		{
+			printf("[ERROR] OnSetPlnJoint_AB: B OnSetSendWaitResponse timeout\n");
+			return false;
+		}
+	}
+	SLEEP(20);
+	if (CRobot::OnGetBuf(&t) == true)
+	{
+		if (t.m_Out[0].m_TrajState != 2)
+		{
+			printf("[ERROR] OnSetPlnJoint_AB: The controller did not receive the sent trajectory of A\n");
+			return false;
+		}
+		if (t.m_Out[1].m_TrajState != 2)
+		{
+			printf("[ERROR] OnSetPlnJoint_AB: The controller did not receive the sent trajectory of B\n");
+			return false;
+		}
+	}
+	CRobot::OnClearSet();
+	CRobot::OnSetTrajRun_A();
+	CRobot::OnSetTrajRun_B();
+	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
+	{
+		printf("[ERROR] OnSetPlnJoint_AB: AB OnSetSendWaitResponse timeout\n");
 		return false;
 	}
 	return true;
@@ -2727,6 +2976,7 @@ bool CRobot::OnStopPlnJoint_B()
 	CRobot::OnStopPlnJoint_interB();
 	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
 	{
+		printf("[ERROR] OnStopPlnJoint_interB: OnSetSendWaitResponse timeout\n");
 		return false;
 	}
 	else
@@ -2771,21 +3021,14 @@ bool CRobot::OnSetTrajSet_B(long serial, long pointNum, double *data)
 	long i;
 	long j;
 	long spos = 0;
-	// printf("\n=== Trajectory Points (total %ld points) ===\n", pointNum);
-	// printf("     Point    J1      J2      J3      J4      J5      J6      J7\n");
-	// printf("--------------------------------------------------------\n");
 	for (i = 0; i < pointNum; i++)
 	{
-		// printf("  %6ld: ", i);
 		for (j = 0; j < 7; j++)
 		{
 			pdat[spos] = data[spos];
-			// printf("%7.3f ", data[spos]);
 			spos++;
 		}
-		// printf("\n");
 	}
-	// printf("========================================================\n");
 	m_InsRobot->m_Slen += sizeof(FX_FLOAT) * 7 * pointNum;
 	FX_UCHAR *pnum = (FX_UCHAR *)&m_InsRobot->m_SendBuf[2];
 	(*pnum)++;

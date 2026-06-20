@@ -48,21 +48,22 @@
         master下marvinSDK_ubuntu.sh运行可自动编译C++和python调用的so文件
 
     
-    手动编译指令：
+    手动编译指令 ：   
+    编译c++调用的dll动态库:
+        windows下使用MinGW编译dll动态库：
+			控制SDK（contrlSDK100343）：g++ *.cpp -Wall -O2 -shared -o libMarvinSDK.dll -DBUILDING_DLL -D_WIN32 -DCMPL_WIN -fPIC -static -static-libgcc -static-libstdc++ -lws2_32 -lwinmm
+			运动学SDK(kinematicsSDK)：g++ *.cpp -Wall -O2 -shared -o libKine.dll -DBUILDING_DLL -D_WIN32 -fPIC -static -static-libgcc -static-libstdc++ -lws2_32 -lwinmm
+        编译的libKine.dll 和 libMarvinSDK.dll 供WINDOWS下python使用
     
-    windows下使用MinGW编译dll动态库：
-            控制SDK（contrlSDK）：g++ *.cpp -Wall -O2 -shared -o libMarvinSDK.dll -DBUILDING_DLL -D_WIN32 -DCMPL_WIN -fPIC -static -static-libgcc -static-libstdc++ -lws2_32 -lwinmm
-            运动学SDK(kinematicsSDK)：g++ *.cpp -Wall -O2 -shared -o libKine.dll -DBUILDING_DLL -D_WIN32 -fPIC -static -static-libgcc -static-libstdc++ -lws2_32 -lwinmm
-    编译的libKine.dll 和 libMarvinSDK.dll 供WINDOWS下python使用
-    
-    linux设备编译:
-    控制SDK(contrlSDK)，以下方法均可编译: 
-        1. g++ *.cpp  -Wall -O2 -fPIC -shared -o libMarvinSDK.so -lpthread -lrt -DCMPL_LIN
-        2./contrlSDK/makefile 生成libMarvinSDK.so
-    运动学SDK(kinematicsSDK)，以下方法均可编译: 
-        1. g++ *.cpp  -Wall -O2 -fPIC -shared -o libKine.so -lpthread -lrt 
-        2./kinematicsSDK/makefile 生成libKine.so
-    编译的libKine.so 和 libMarvinSDK.so 供编译机器下的下C++和python使用
+    编译so动态库:
+        linux设备编译:
+            控制SDK(contrlSDK100343)，以下方法均可编译: 
+                1. g++ *.cpp -Wall -O2 -fPIC -shared -o libMarvinSDK.so -lpthread -lrt -DCMPL_LIN
+                2./contrlSDK100343/makefile 生成libMarvinSDK.so
+            运动学SDK(kinematicsSDK)，以下方法均可编译: 
+                1. g++ *.cpp -Wall -O2 -fPIC -shared -o libKine.so -lpthread -lrt 
+                2./kinematicsSDK/makefile 生成libKine.so
+	    编译的libKine.so 和 libMarvinSDK.so 供编译机器下的下C++和python使用
 
 ## 二、 接口详解 
 
@@ -193,6 +194,7 @@ fk_nsp(joints: list)
 
 ### （7）计算逆运动学
 ik(structure_data):
+
         '''末端位置和姿态逆解到关节值
         :param 结构体数据
             输入参数：
@@ -250,6 +252,7 @@ ik(structure_data):
 
 ### （8）计算末端位姿不变、改变零空间（臂角方向）的逆运动学
 ik_nsp(sturcture_data):
+
         '''逆解优化：可调整方向,不能单独使用，ik得到的逆运动学解的臂角不满足当前选解需求时使用。
             输入参数：
                 m_Input_IK_TargetTCP：末端位置姿态4x4列表，可通过正解接口获取或者指定末端的位置和旋转
@@ -410,13 +413,76 @@ xyzabc_to_mat4x4(xyzabc:list)
         
 ### （17）位姿矩阵展开表示
 mat4x4_to_mat1x16(self,pose_mat):
-        matrix_data=[]
-        for i in range(4):
-            for j in range(4):
-                matrix_data.append(pose_mat[i][j])
-        return matrix_data
 
 
+### （18）多点规划
+multi_movL_set_start(self, ref_joints: List[float], start_xyzabc: List[float],
+                             end_xyzabc: List[float], allow_range: float, zsp_type: int,
+                             zsp_para: List[float], vel: float, acc: float, freq: int) -> bool
+        
+        """设置MOVL直线规划起始段（含起始点、目标点、过渡参数等）
+        :param ref_joints:起始点各个关节位置（单位：角度）
+        :param start_xyzabc:坐标空间的起点
+        :param end_joints:坐标空间的起点终点
+        :param allow_range: 允许改变臂焦的范围
+        :param zsp_type: 是否改变臂角度
+        :param zsp_para: 臂角参数
+        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
+        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为10000 mm/s^2
+        :param freq_hz:设置内部规划频率(注意：基频设置为1000Hz，下发点位频率若不是基频的整数分频，则默认频率为500Hz)
+        :return: 成功返回True，失败返回False
+        """
+
+multi_movL_next_point(self,
+                                next_xyzabc: List[float], 
+                                allow_range: float,
+                                zsp_type: int,
+                                zsp_para: List[float], 
+                                vel: float,
+                                acc: float
+                                ) -> bool
+        
+        """
+        设置MOVL直线规划的中间途经点（需先调用multi_movL_set_start）
+        :param next_xyzabc:坐标空间加点
+        :param allow_range: 允许改变臂焦的范围
+        :param zsp_type: 是否改变臂角度
+        :param zsp_para: 臂角参数
+        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
+        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为10000 mm/s^2
+        :return: 成功返回True，失败返回False
+        """
+
+multi_movL_get_points(self, dimension: int = 7)-> tuple[List[List[float]], ctypes.c_void_p]
+        
+        """
+        获取已设置的多段MOVL规划路径点集（需先调用multi_movL_set_start和若干multi_movL_next_point）
+        :param dimension: 点集维度，默认为7（关节角度）
+        :return: (data_list, pset) 其中pset是点集句柄（ctypes.c_void_p），
+                 调用者必须在使用完毕后调用 self.destroy_point_set(pset) 释放。
+                 失败时返回 ([], None)
+        """
+
+### （19）直线优先规划
+mov_target(self,
+                start_xyzabc: List[float],   # 6个元素
+                end_xyzabc: List[float],     # 6个元素
+                ref_joints: List[float],     # 7个元素
+                vel: float,
+                acc: float,
+                freq_hz: int,
+                dimension: int = 7) -> tuple[List[List[float]], ctypes.c_void_p]
+        
+        """点到点规划（直线优先、关节兜底），规划后返回点集数据
+
+        :param start_xyzabc: 起始点位姿 (X, Y, Z, A, B, C) 单位：mm 和 度
+        :param end_xyzabc:   终点位姿 (X, Y, Z, A, B, C)
+        :param ref_joints:   参考关节角 (7个关节，单位：度)
+        :param vel:          速度，单位 mm/s，范围 0.1~1000
+        :param acc:          加速度，单位 mm/s²，范围 0.1~10000
+        :param freq_hz:      规划频率（基频1000Hz，下发频率可能被调整）
+        :return: (点集列表, pset指针) 维度根据实际规划确定
+        """
 
 ## 三、案例脚本
 [showcase for python](DEMO_PYTHON/readme.md)

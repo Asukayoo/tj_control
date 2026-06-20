@@ -19,7 +19,7 @@
 **实机验收命令**（必须通过）：
 
 ```bash
-export LD_LIBRARY_PATH=$TJ_SDK/contrlSDK:/opt/ros/humble/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$TJ_SDK/contrlSDK100343:/opt/ros/humble/lib:$LD_LIBRARY_PATH
 cmake --build build --target test_enable -j
 ./build/tj_test/test_enable data/test_enable --cpu=2
 # timing.csv: run_us 中位数 < 500；period_us 中位数 950~1050

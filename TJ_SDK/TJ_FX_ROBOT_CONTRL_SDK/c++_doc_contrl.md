@@ -74,21 +74,21 @@
 ## 1.3 SDK库文件编译
 
     使用自动化编译脚本：
-        master分支下marvinSDK_windows.bat运行可自动编译C++和python调用的dll文件
-        master分支下marvinSDK_ubuntu.sh运行可自动编译C++和python调用的so文件
+        master分支下marvinSDK_windows_100343.bat运行可自动编译C++和python调用的dll文件
+        master分支下marvinSDK_ubuntu_100343.sh运行可自动编译C++和python调用的so文件
 
     手动编译指令 ：   
     编译c++调用的dll动态库:
         1)windows下使用MinGW编译dll动态库:
-                控制SDK(contrlSDK): g++ *.cpp -Wall -O2 -shared -o libMarvinSDK.dll -lws2_32 -lwinmm -DCMPL_WIN
+                控制SDK(contrlSDK100343): g++ *.cpp -Wall -O2 -shared -o libMarvinSDK.dll -lws2_32 -lwinmm -DCMPL_WIN
                 运动学SDK(kinematicsSDK): g++ *.cpp *.c -Wall -O2 -fPIC -shared -o libKine.dll
         编译的libKine.dll 和 libMarvinSDK.dll 供WINDOWS下C++使用
     
     编译so动态库:
         linux设备编译:
-            控制SDK(contrlSDK)，以下方法均可编译: 
+            控制SDK(contrlSDK100343)，以下方法均可编译: 
                 1. g++ *.cpp  -Wall -O2 -fPIC -shared -o libMarvinSDK.so -lpthread -lrt -DCMPL_LIN
-                2./contrlSDK/makefile 生成libMarvinSDK.so
+                2./contrlSDK100343/makefile 生成libMarvinSDK.so
             运动学SDK(kinematicsSDK)，以下方法均可编译: 
                 1. g++ *.cpp  -Wall -O2 -fPIC -shared -o libKine.so -lpthread -lrt 
                 2./kinematicsSDK/makefile 生成libKine.so
@@ -98,10 +98,10 @@
 
 ### 1.4 不使用动态库，源码调用
 
-    使用contrlSDK为例, 假设调用代码文件main.cpp在和 contrlSDK 同级目录文件夹workspace下， 
+    使用contrlSDK100343为例, 假设调用代码文件main.cpp在和 contrlSDK 同级目录文件夹workspace下， 
     目录树为：
     ...
-    |---contrlSDK
+    |---contrlSDK100343
     |---workspace
         |--- main.cpp
     ...
@@ -109,14 +109,14 @@
 
     则编译指令为：
     1）windows下编译指令：
-    g++ -Wall main.cpp ../contrlSDK/*.cpp -I../contrlSDK -o main.exe -lws2_32 -lwinmm -DCMPL_WIN
+    g++ -Wall main.cpp ../contrlSDK100343/*.cpp -I../contrlSDK100343 -o main.exe -lws2_32 -lwinmm -DCMPL_WIN
 
     2）linux下编译指令：
-    g++ -Wall main.cpp ../contrlSDK/*.cpp -I../contrlSDK -o main -lpthread -lrt -DCMPL_LIN
+    g++ -Wall main.cpp ../contrlSDK100343/*.cpp -I../contrlSDK100343 -o main -lpthread -lrt -DCMPL_LIN
 
     编译完成后，会生成
     ...
-    |---contrlSDK
+    |---contrlSDK100343
     |---workspace
         |--- main.cpp
         |--- main.exe or main
@@ -830,42 +830,60 @@ bool OnSetDragSpace_B(int dgType);
         3.切换不同拖动模式前需要退出拖动模式再切换，否则控制效果是叠加混乱的。
 
 ## （21）设置末端笛卡尔方向的旋转
-//自定义设置末端笛卡尔方向的旋转
-//自定义设置左臂末端旋转方向fcType=1。 笛卡尔方向：CartCtrlPara前三个参数置为末端基于基座X Y Z顺序的旋转，后四个为保留参数，填0
-bool OnSetEefRot_A(int fcType, double CartCtrlPara[7]);
-//自定义设置右臂臂末端旋转方向fcType=1。 笛卡尔方向：CartCtrlPara前三个参数置为末端基于基座X Y Z顺序的旋转，后四个为保留参数，填0
-bool OnSetEefRot_B(int fcType, double CartCtrlPara[7]);
+### 自定义设置末端笛卡尔方向的旋转
+    自定义设置左臂末端旋转方向fcType=1。 笛卡尔方向：CartCtrlPara前三个参数置为末端基于基座X Y Z顺序的旋转，后四个为保留参数，填0
+    bool OnSetEefRot_A(int fcType, double CartCtrlPara[7]);
+    
+    自定义设置右臂臂末端旋转方向fcType=1。 笛卡尔方向：CartCtrlPara前三个参数置为末端基于基座X Y Z顺序的旋转，后四个为保留参数，填0
+    bool OnSetEefRot_B(int fcType, double CartCtrlPara[7]);
 
-//实时末端笛卡尔方向的旋转
-//设置左臂fcType=2，为系统自动计算末端笛卡尔旋转。 CartCtrlPara全填0
-bool OnSetEefRot_A(int fcType, double CartCtrlPara[7]);
-//设置右臂fcType=2，为系统自动计算末端笛卡尔旋转。 CartCtrlPara全填0
-bool OnSetEefRot_B(int fcType, double CartCtrlPara[7]);
+### 实时末端笛卡尔方向的旋转
+    设置左臂fcType=2，为系统自动计算末端笛卡尔旋转。 CartCtrlPara全填0
+    bool OnSetEefRot_A(int fcType, double CartCtrlPara[7]);
+    
+    设置右臂fcType=2，为系统自动计算末端笛卡尔旋转。 CartCtrlPara全填0
+    bool OnSetEefRot_B(int fcType, double CartCtrlPara[7]);
 
 ## （22）规划功能
- //关节空间PLN方式发送指令
- bool OnInitPlnLmt(char * path);
- bool OnSetPlnJoint_A(double start_joints[7], double stop_joints[7],double vel_ratio,double acc_ratio);
- bool OnSetPlnJoint_B(double start_joints[7], double stop_joints[7],double vel_ratio,double acc_ratio);
+### 关节空间PLN方式发送指令
+    关节空间规划初始化
+    bool OnInitPlnLmt(char * path);
     
-    path： 机器人配置参数文件*.MvKDCfg，请确认参数与使用机型是否对应
-    start_joints： 起点各关节位置/当前点关节位置， 单位：度
-    stop_joints： 目标点关节位置， 单位：度
-    vel_ratio：规划器速度比例：范围0~1
-    acc_ratio：规划器加速度比例：范围0~1
+    手臂关节规划
+    bool OnSetPlnJoint_A(double start_joints[7], double stop_joints[7],double vel_ratio,double acc_ratio);
+    bool OnSetPlnJoint_B(double start_joints[7], double stop_joints[7],double vel_ratio,double acc_ratio);
+        path： 机器人配置参数文件*.MvKDCfg，请确认参数与使用机型是否对应
+        start_joints： 起点各关节位置/当前点关节位置， 单位：度
+        stop_joints： 目标点关节位置， 单位：度
+        vel_ratio：规划器速度比例：范围0~1
+        acc_ratio：规划器加速度比例：范围0~1
 
-// 笛卡尔空间PLN方式发送指令
- bool OnSetPlnCart_A(CPointSet* pset);
- bool OnSetPlnCart_B(CPointSet* pset);
+### 笛卡尔空间PLN方式发送指令
+    创建点集
+    void *FX_CPointSet_Create();
+
+    销毁点集
+    void FX_CPointSet_Destroy(void *pset);
+
+    计算接口规划的点集下发给控制器以50HZ执行规   
+    bool OnSetPlnCart_A(void *pset);
+    bool OnSetPlnCart_B(void *pset);
+
+    pset：由KinematicsSDK的规划接口得到的点集
+
+### 中断规划运行，笛卡尔空间和关节空间都适用
+	bool OnStopPlnJoint_A();
+	bool OnStopPlnJoint_B();
+
+## 协同运行，同时开始，只有路径长度速度相同，才会同时结束
+    关节空间两个手臂同时规划运行，注意同时开始，不一定同时结束。
+    bool CoRunPlnJoint(double start_joints_A[7], double stop_joints_A[7], double start_joints_B[7], double stop_joints_B[7], double vel_ratio, double acc_ratio);
+
+    笛卡尔空间两个手臂从当前点规划方式运行到目标点，规划点位pset由KinematicsSDK的规划计算得出。
+    bool CoRunPlnCart(void *pset0, void *pset1);
     
-    CPointSet：使用计算库kinematicsSDK 的规划接口FX_Robot_PLN_MOVLA 得到的点集作为输入
-   
- 
-//中断规划运行
- bool OnStopPlnJoint_A();
- bool OnStopPlnJoint_B();
-
-
+    同时中断两个手臂的规划运行，笛卡尔空间和关节空间都适用
+    bool CoStopPln();
 
 # 三、简明式接口介绍
     /////////////////////////////////////简明式接口Concise SDK API//////////////////////////////////////////////

@@ -534,7 +534,7 @@ bool OnSetForceCtrPara_A(int fcType, double fxDir[6], double fcCtrlPara[7], doub
 	}
 	if (isnan(fcAdjLmt) || isinf(fcAdjLmt))
 	{
-		printf("[ERROR] OnSetForceCtrPara_A: fcAdjLmt %lf is invalid (NaN or Inf)\n",fcAdjLmt);
+		printf("[ERROR] OnSetForceCtrPara_A: fcAdjLmt %lf is invalid (NaN or Inf)\n", fcAdjLmt);
 		return false;
 	}
 	return CRobot::OnSetForceCtrPara_A(fcType, fxDir, fcCtrlPara, fcAdjLmt);
@@ -562,7 +562,7 @@ bool OnSetForceCmd_A(double force)
 {
 	if (isnan(force) || isinf(force))
 	{
-		printf("[ERROR] OnSetForceCmd_A: force %lf is invalid (NaN or Inf)\n",force);
+		printf("[ERROR] OnSetForceCmd_A: force %lf is invalid (NaN or Inf)\n", force);
 		return false;
 	}
 	return CRobot::OnSetForceCmd_A(force);
@@ -798,7 +798,7 @@ bool OnSetForceCtrPara_B(int fcType, double fxDir[6], double fcCtrlPara[7], doub
 	}
 	if (isnan(fcAdjLmt) || isinf(fcAdjLmt))
 	{
-		printf("[ERROR] OnSetForceCtrPara_B: fcAdjLmt %lf is invalid (NaN or Inf)\n",fcAdjLmt);
+		printf("[ERROR] OnSetForceCtrPara_B: fcAdjLmt %lf is invalid (NaN or Inf)\n", fcAdjLmt);
 		return false;
 	}
 	return CRobot::OnSetForceCtrPara_B(fcType, fxDir, fcCtrlPara, fcAdjLmt);
@@ -826,7 +826,7 @@ bool OnSetForceCmd_B(double force)
 {
 	if (isnan(force) || isinf(force))
 	{
-		printf("[ERROR] OnSetForceCmd_B: force %lf is invalid (NaN or Inf)\n",force);
+		printf("[ERROR] OnSetForceCmd_B: force %lf is invalid (NaN or Inf)\n", force);
 		return false;
 	}
 	return CRobot::OnSetForceCmd_B(force);
@@ -949,14 +949,247 @@ bool OnSetPlnJoint_B(double start_joints[7], double stop_joints[7], double vel_r
 	return CRobot::OnSetPlnJoint_B(start_joints, stop_joints, vel_ratio, acc_ratio);
 }
 
+bool CoRunPlnJoint(double start_joints_A[7], double stop_joints_A[7], double start_joints_B[7], double stop_joints_B[7], double vel_ratio, double acc_ratio)
+{
+	if (start_joints_A == nullptr || stop_joints_A == nullptr || start_joints_B == nullptr || stop_joints_B == nullptr)
+	{
+		printf("[ERROR] OnSetPlnJoint_AB: Null pointer input\n");
+		return false;
+	}
+	for (int i = 0; i < 7; ++i)
+	{
+		if (isnan(start_joints_A[i]) || isinf(start_joints_A[i]) || isnan(start_joints_A[i]) || isinf(start_joints_A[i]))
+		{
+			printf("[ERROR] OnSetPlnJoint_AB: start_joints_A[%d] is invalid (NaN or Inf)\n", i);
+			return false;
+		}
+		if (isnan(start_joints_B[i]) || isinf(start_joints_B[i]))
+		{
+			printf("[ERROR] OnSetPlnJoint_AB: start_joints_B[%d] is invalid (NaN or Inf)\n", i);
+			return false;
+		}
+		if (isnan(stop_joints_A[i]) || isinf(stop_joints_A[i]))
+		{
+			printf("[ERROR] OnSetPlnJoint_AB: stop_joints_A[%d] is invalid (NaN or Inf)\n", i);
+			return false;
+		}
+		if (isnan(stop_joints_B[i]) || isinf(stop_joints_B[i]))
+		{
+			printf("[ERROR] OnSetPlnJoint_AB: stop_joints_B[%d] is invalid (NaN or Inf)\n", i);
+			return false;
+		}
+	}
+	if (vel_ratio < 0)
+	{
+		printf("[ERROR] OnSetPlnJoint_AB: Invalid vel_ratio %lf (valid range: 0~1)\n", vel_ratio);
+		return false;
+	}
+	if (vel_ratio > 1)
+	{
+		printf("[WARNING] OnSetPlnJoint_AB: Invalid vel_ratio %lf (valid range: 0~1), set vel_ratio to 1\n", vel_ratio);
+		vel_ratio = 1.0;
+	}
+	if (acc_ratio < 0)
+	{
+		printf("[ERROR] OnSetPlnJoint_AB: Invalid acc_ratio %lf (valid range: 0~1)\n", acc_ratio);
+		return false;
+	}
+	if (acc_ratio > 1)
+	{
+		printf("[WARNING] OnSetPlnJoint_AB: Invalid acc_ratio %lf (valid range: 0~1), set acc_ratio to 1\n", acc_ratio);
+		acc_ratio = 1.0;
+	}
+	return CRobot::OnSetPlnJoint_AB(start_joints_A, stop_joints_A, start_joints_B, stop_joints_B, vel_ratio, acc_ratio);
+}
+
+bool CoRunPlnCart(void *pset0, void *pset1)
+{
+	DCSS t;
+	long num0 = static_cast<CPointSet *>(pset0)->OnGetPointNum();
+	long num1 = static_cast<CPointSet *>(pset1)->OnGetPointNum();
+	printf("num0:%ld, num1 :%ld \n", num0, num1);
+	if (num0 <= 5 || num1 <= 5)
+	{
+		printf("[ERROR] CoRunPlnCart: planning points to less!");
+		return false;
+	}
+
+	CRobot::OnClearSet();
+	CRobot::OnSetTrajInit_A(num0);
+	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
+	{
+		printf("[ERROR] OnSetTrajInit_B: timeout.\n");
+		return false;
+	}
+	SLEEP(SLEEP_TIME);
+	if (CRobot::OnGetBuf(&t) == true)
+	{
+		if (t.m_Out[0].m_TrajState != 1)
+		{
+			printf("[ERROR] CoRunPlnCart: controller did not enter in run planning mode.\n");
+			return false;
+		}
+	}
+	long send_g_num = num0 / 50;
+	long relic_num = num0 % 50;
+	long ii, jj, kk;
+	double SendData_A[350];
+	double *retp0;
+	long spos;
+	long ipos0 = 0;
+	for (ii = 0; ii < send_g_num; ii++)
+	{
+		spos = 0;
+		for (jj = 0; jj < 50; jj++)
+		{
+			retp0 = static_cast<CPointSet *>(pset0)->OnGetPoint(ipos0++);
+			for (kk = 0; kk < 7; kk++)
+				SendData_A[spos++] = retp0[kk];
+		}
+		CRobot::OnClearSet();
+		CRobot::OnSetTrajSet_A(ii, 50, SendData_A);
+		if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
+		{
+			printf("[ERROR] CoRunPlnCart: OnSetTrajSet_A timeout.\n");
+			return false;
+		}
+	}
+	if (relic_num != 0)
+	{
+		spos = 0;
+		for (jj = 0; jj < relic_num; jj++)
+		{
+			retp0 = static_cast<CPointSet *>(pset0)->OnGetPoint(ipos0++);
+			for (kk = 0; kk < 7; kk++)
+				SendData_A[spos++] = retp0[kk];
+		}
+		CRobot::OnClearSet();
+		CRobot::OnSetTrajSet_A(ii, relic_num, SendData_A);
+		if (CRobot::OnSetSendWaitResponse(5000) < 0)
+		{
+			printf("[ERROR] CoRunPlnCart: OnSetTrajSet_A timeout.\n");
+			return false;
+		}
+	}
+	SLEEP(20);
+	CRobot::OnGetBuf(&t);
+	if (t.m_Out[0].m_TrajState != 2)
+	{
+		printf("[ERROR] CoRunPlnCart: controller did not receive trajectory of A.\n");
+		return false;
+	}
+
+	CRobot::OnClearSet();
+	CRobot::OnSetTrajInit_B(num1);
+	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
+	{
+		printf("[ERROR] OnSetTrajInit_B: timeout.\n");
+		return false;
+	}
+	SLEEP(SLEEP_TIME);
+	if (CRobot::OnGetBuf(&t) == true)
+	{
+		if (t.m_Out[1].m_TrajState != 1)
+		{
+			printf("[ERROR] CoRunPlnCart: controller did not enter in run planning mode.\n");
+			return false;
+		}
+	}
+	send_g_num = num1 / 50;
+	relic_num = num1 % 50;
+	double SendData_B[350];
+	double *retp1;
+	long ipos1 = 0;
+	for (ii = 0; ii < send_g_num; ii++)
+	{
+		spos = 0;
+		for (jj = 0; jj < 50; jj++)
+		{
+			retp1 = static_cast<CPointSet *>(pset1)->OnGetPoint(ipos1++);
+			for (kk = 0; kk < 7; kk++)
+				SendData_B[spos++] = retp1[kk];
+		}
+
+		CRobot::OnClearSet();
+		CRobot::OnSetTrajSet_B(ii, 50, SendData_B);
+		if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
+		{
+			printf("[ERROR] CoRunPlnCart: OnSetTrajSet_B timeout.\n");
+			return false;
+		}
+	}
+	if (relic_num != 0)
+	{
+		spos = 0;
+		for (jj = 0; jj < relic_num; jj++)
+		{
+			retp1 = static_cast<CPointSet *>(pset1)->OnGetPoint(ipos1++);
+			for (kk = 0; kk < 7; kk++)
+				SendData_B[spos++] = retp1[kk];
+		}
+		CRobot::OnClearSet();
+		CRobot::OnSetTrajSet_B(ii, relic_num, SendData_B);
+		if (CRobot::OnSetSendWaitResponse(5000) < 0)
+		{
+			printf("[ERROR] CoRunPlnCart: OnSetTrajSet_B timeout.\n");
+			return false;
+		}
+	}
+	SLEEP(20);
+	CRobot::OnGetBuf(&t);
+	if (t.m_Out[1].m_TrajState != 2)
+	{
+		printf("[ERROR] CoRunPlnCart: controller did not receive trajectory of B.\n");
+		return false;
+	}
+
+	CRobot::OnClearSet();
+	CRobot::OnSetTrajRun_A();
+	CRobot::OnSetTrajRun_B();
+	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
+	{
+		printf("[ERROR] CoRunPlnCart: set run trajectory timeout.\n");
+		return false;
+	}
+
+	return true;
+}
+
 bool OnStopPlnJoint_B()
 {
-	return CRobot::OnStopPlnJoint_B();
+	CRobot::OnClearSet();
+	CRobot::OnStopPlnJoint_interB();
+	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
+	{
+		printf("[ERROR] OnStopPlnJoint_B: OnSetSendWaitResponse timeout");
+		return false;
+	}
+	return true;
 }
 
 bool OnStopPlnJoint_A()
 {
-	return CRobot::OnStopPlnJoint_A();
+	CRobot::OnClearSet();
+	CRobot::OnStopPlnJoint_interA();
+	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
+	{
+		printf("[ERROR] OnStopPlnJoint_A: OnSetSendWaitResponse timeout");
+		return false;
+	}
+	return true;
+}
+
+bool CoStopPln()
+{
+	CRobot::OnClearSet();
+	CRobot::OnStopPlnJoint_interA();
+	CRobot::OnStopPlnJoint_interB();
+	if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
+	{
+		printf("[ERROR] CoStopPln: A&B arm stop run Planning Trajectory failed, timeout.\n");
+		return false;
+	}
+	return true;
 }
 
 bool OnSetPlnCart_A(void *pset)
@@ -1210,10 +1443,12 @@ bool Connect(FX_UCHAR ip1, FX_UCHAR ip2, FX_UCHAR ip3, FX_UCHAR ip4, int log_swt
 	}
 	if (!CheckArmError())
 	{
+		printf("[ERROR] Connect: arms in error state\n");
 		return false;
 	}
 	if (!CheckServoError())
 	{
+		printf("[ERROR] Connect: servos in error state\n");
 		return false;
 	}
 	DCSS dcss;
@@ -1370,10 +1605,12 @@ bool RunPVT(FX_CHAR arm, int id)
 	}
 	if (!CheckArmError())
 	{
+		printf("[ERROR] RunPVT: arms in error state\n");
 		return false;
 	}
 	if (!CheckServoError())
 	{
+		printf("[ERROR] RunPVT: servos in error state\n");
 		return false;
 	}
 	DCSS dcss;
@@ -1618,10 +1855,12 @@ bool SetJointMode(FX_CHAR arm, int velRatio, int AccRatio)
 	}
 	if (!CheckArmError())
 	{
+		printf("[ERROR] SetJointMode: arms in error state\n");
 		return false;
 	}
 	if (!CheckServoError())
 	{
+		printf("[ERROR] SetJointMode: servos in error state\n");
 		return false;
 	}
 	DCSS dcss;
@@ -1804,10 +2043,12 @@ bool SetImpJointMode(FX_CHAR arm, int velRatio, int AccRatio, double K[7], doubl
 	}
 	if (!CheckArmError())
 	{
+		printf("[ERROR] SetImpJointMode: arms in error state\n");
 		return false;
 	}
 	if (!CheckServoError())
 	{
+		printf("[ERROR] SetImpJointMode: servos in error state\n");
 		return false;
 	}
 	DCSS dcss;
@@ -2000,10 +2241,12 @@ bool SetImpCartMode(FX_CHAR arm, int velRatio, int AccRatio, double K[7], double
 	}
 	if (!CheckArmError())
 	{
+		printf("[ERROR] SetImpCartMode: arms in error state\n");
 		return false;
 	}
 	if (!CheckServoError())
 	{
+		printf("[ERROR] SetImpCartMode: servos in error state\n");
 		return false;
 	}
 	DCSS dcss;
@@ -2184,10 +2427,12 @@ bool SetImpForceMode(FX_CHAR arm, double fxDir[6], double fcAdjLmt)
 	}
 	if (!CheckArmError())
 	{
+		printf("[ERROR] SetImpForceMode: arms in error state\n");
 		return false;
 	}
 	if (!CheckServoError())
 	{
+		printf("[ERROR] SetImpForceMode: servos in error state\n");
 		return false;
 	}
 	DCSS dcss;
@@ -2305,10 +2550,12 @@ bool SetJointDrag(FX_CHAR arm)
 	}
 	if (!CheckArmError())
 	{
+		printf("[ERROR] SetJointDrag: arms in error state\n");
 		return false;
 	}
 	if (!CheckServoError())
 	{
+		printf("[ERROR] SetJointDrag: servos in error state\n");
 		return false;
 	}
 	DCSS dcss;
@@ -2679,7 +2926,7 @@ bool SetForceCmd(FX_CHAR arm, double force)
 	}
 	if (isnan(force) || isinf(force))
 	{
-		printf("[ERROR] SetForceCmd: force %lf is invalid (NaN or Inf)\n",force);
+		printf("[ERROR] SetForceCmd: force %lf is invalid (NaN or Inf)\n", force);
 		return false;
 	}
 	if (arm == 'A')
@@ -2784,10 +3031,12 @@ bool RunPlnJoint(FX_CHAR arm, double start_joints[7], double stop_joints[7], dou
 		{
 			if (!CheckArmError())
 			{
+				printf("[ERROR] RunPlnJoint: arms in error state\n");
 				return false;
 			}
 			if (!CheckServoError())
 			{
+				printf("[ERROR] RunPlnJoint: servos in error state\n");
 				return false;
 			}
 			CRobot::OnClearSet();
@@ -2840,10 +3089,12 @@ bool RunPlnJoint(FX_CHAR arm, double start_joints[7], double stop_joints[7], dou
 		{
 			if (!CheckArmError())
 			{
+				printf("[ERROR] RunPlnJoint: arms in error state\n");
 				return false;
 			}
 			if (!CheckServoError())
 			{
+				printf("[ERROR] RunPlnJoint: servos in error state\n");
 				return false;
 			}
 			CRobot::OnClearSet();
@@ -2909,10 +3160,12 @@ bool RunPlnCart(FX_CHAR arm, void *pset)
 		{
 			if (!CheckArmError())
 			{
+				printf("[ERROR] RunPlnCart: arms in error state\n");
 				return false;
 			}
 			if (!CheckServoError())
 			{
+				printf("[ERROR] RunPlnCart: servos in error state\n");
 				return false;
 			}
 			CRobot::OnClearSet();
@@ -2965,10 +3218,12 @@ bool RunPlnCart(FX_CHAR arm, void *pset)
 		{
 			if (!CheckArmError())
 			{
+				printf("[ERROR] RunPlnCart: arms in error state\n");
 				return false;
 			}
 			if (!CheckServoError())
 			{
+				printf("[ERROR] RunPlnCart: servos in error state\n");
 				return false;
 			}
 			CRobot::OnClearSet();

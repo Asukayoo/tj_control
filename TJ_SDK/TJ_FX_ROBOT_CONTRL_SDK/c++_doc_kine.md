@@ -27,22 +27,22 @@
 
 ## 1.2 SDK库文件编译
 
-    使用自动化编译脚本：
-        master分支下marvinSDK_windows.bat运行可自动编译C++和python调用的dll文件
-        master分支下marvinSDK_ubuntu.sh运行可自动编译C++和python调用的so文件
+   使用自动化编译脚本：
+        master分支下marvinSDK_windows_100343.bat运行可自动编译C++和python调用的dll文件
+        master分支下marvinSDK_ubuntu_100343.sh运行可自动编译C++和python调用的so文件
 
     手动编译指令 ：   
     编译c++调用的dll动态库:
         1)windows下使用MinGW编译dll动态库:
-                控制SDK(contrlSDK): g++ *.cpp -Wall -O2 -shared -o libMarvinSDK.dll -lws2_32 -lwinmm -DCMPL_WIN
+                控制SDK(contrlSDK100343): g++ *.cpp -Wall -O2 -shared -o libMarvinSDK.dll -lws2_32 -lwinmm -DCMPL_WIN
                 运动学SDK(kinematicsSDK): g++ *.cpp *.c -Wall -O2 -fPIC -shared -o libKine.dll
         编译的libKine.dll 和 libMarvinSDK.dll 供WINDOWS下C++使用
     
     编译so动态库:
         linux设备编译:
-            控制SDK(contrlSDK)，以下方法均可编译: 
+            控制SDK(contrlSDK100343)，以下方法均可编译: 
                 1. g++ *.cpp  -Wall -O2 -fPIC -shared -o libMarvinSDK.so -lpthread -lrt -DCMPL_LIN
-                2./contrlSDK/makefile 生成libMarvinSDK.so
+                2./contrlSDK100343/makefile 生成libMarvinSDK.so
             运动学SDK(kinematicsSDK)，以下方法均可编译: 
                 1. g++ *.cpp  -Wall -O2 -fPIC -shared -o libKine.so -lpthread -lrt 
                 2./kinematicsSDK/makefile 生成libKine.so
@@ -65,7 +65,7 @@
     	Matrix4					m_Input_IK_TargetTCP; //末端位置姿态4x4列表，可通过正解接口获取，或者指定末端的位置和旋转
     	Vect7					m_Input_IK_RefJoint; //参考输入角度，约束构想接近参考解读，防止解出来的构型跳变。该构型的肩、肘、腕组成初始臂角平面，以肩到腕方向为Z向量，参考角第四关节不能为零。
     	FX_INT32L				m_Input_IK_ZSPType; //零空间约束类型（0：使求解结果与参考关节角的欧式距离最小适用于一般冗余优化；1：与参考臂角平面最近，需要额外提供平面参数zsp_para）
-    	FX_DOUBLE				m_Input_IK_ZSPPara[6]; //若选择零空间约束类型zsp_type为1，则需额外输入参考角平面参数，目前仅支持平移方向的参数约束，即[x,y,z,a,b,c]=[0,0,0,0,0,0],可选择x,y,z其中一个方向调整
+    	FX_DOUBLE				m_Input_IK_ZSPPara[6]; //若选择零空间约束类型zsp_type为1，则需额外输入肘平面向量（肘点向肩腕连线的垂线向量，该向量表达基于机械臂基坐标系下）
     	FX_DOUBLE				m_Input_ZSP_Angle; //末端位姿不变的情况下，零空间臂角相对于参考平面的旋转角度（单位：度）,可正向调节也可逆向调节. 在ref_joints为初始臂角平面情况下，使用右手法则，绕Z向量正向旋转为臂角增加方向，绕Z向量负向旋转为臂角减少方向
     	FX_DOUBLE               m_DGR1; //(仅在IK_NSP接口中设置起效)判断第二关节发生奇异的角度范围，数值范围为0.05-10(单位：度)，不设置情况下默认0.05度
     	FX_DOUBLE               m_DGR2; //(仅在IK_NSP接口中设置起效)判断第六关节发生奇异的角度范围，数值范围为0.05-10(单位：度)，不设置情况下默认0.05度
@@ -184,7 +184,7 @@ FX_BOOL  FX_Robot_Kine_FK(FX_INT32L RobotSerial, FX_DOUBLE joints[7], Matrix4 pg
 ###   5.计算正运动学和零空间(臂角平面)参数
 FX_BOOL  FX_Robot_Kine_FK_NSP(FX_INT32L RobotSerial, FX_DOUBLE joints[7], Matrix4 pgos, Matrix3 nspg);
 
-  • 输入七关节角度及RobotSerial（参数含义参考初始化参数部分），输出为4*4的法兰末端位姿矩阵,并得到基于该角度下的零空间参数
+    • 输入七关节角度及RobotSerial（参数含义参考初始化参数部分），输出为4*4的法兰末端位姿矩阵,并得到基于该角度下的零空间参数
     输入：
         1. FX_INT32L RobotSerial：0，左臂；1，右臂
         2. FX_DOUBLE joints[7]:需要得到末端齐次变换矩阵的输入关节角度，单位：度
@@ -193,9 +193,9 @@ FX_BOOL  FX_Robot_Kine_FK_NSP(FX_INT32L RobotSerial, FX_DOUBLE joints[7], Matrix
     输出：
         成功：True/1; 失败：False/0
         
- • 特别提示:零空间参数矩阵 nspg(3,3), 其中第一列可以作为逆解结构体里面m_Input_IK_ZSPPara的x y z的输入值。
+    • 特别提示:零空间参数矩阵 nspg(3,3), 其中第一列可以作为逆解结构体里面m_Input_IK_ZSPPara的x y z的输入值。
 
-    
+        
 
 ###    6. 计算逆运动学
 FX_BOOL  FX_Robot_Kine_IK(FX_INT32L RobotSerial, FX_InvKineSolvePara *solve_para)
@@ -207,6 +207,8 @@ FX_BOOL  FX_Robot_Kine_IK(FX_INT32L RobotSerial, FX_InvKineSolvePara *solve_para
             • 输入项
                 • Matrix4 m_Input_IK_TargetTCP ：4*4的目标点末端的位姿矩阵
                 • Vect7   m_Input_IK_RefJoint  ：逆运动学的各关节参考角（单位：度）
+                • FX_INT32L m_Input_IK_ZSPType ：零空间约束类型（0：使求解结果与参考关节角的欧式距离最小适用于一般冗余优化；1：与参考臂角平面最近，需要额外提供平面参数zsp_para）
+    	        • FX_DOUBLE m_Input_IK_ZSPPara[6] ：若选择零空间约束类型zsp_type为1，则需额外输入肘平面向量（肘点向肩腕连线的垂线向量，该向量表达基于机械臂基坐标系下）
             • 输出项
                 • Vect7   m_Output_RetJoint      ：逆运动学解出的关节角度（选解策略为与参考关节角最近）（单位：度）
                 • Matrix8 m_OutPut_AllJoint      ：逆运动学的全部解（每一行代表一组解,分别存放1-7关节的角度值）（单位：度）
@@ -292,8 +294,6 @@ FX_BOOL  FX_Robot_PLN_MOVL(FX_INT32L RobotSerial, Vect6 Start_XYZABC, Vect6 End_
     输出：
         成功：True/1; 失败：False/0
 
-
-    • 输出点位频率为500Hz
     • FX_Robot_PLN_MOVL的特点在于根据提供的起始目标笛卡尔位姿和终止目标笛卡尔位姿规划一段直线路径点，该接口不约束到达终点时的机器人构型。
     
 
@@ -312,11 +312,9 @@ FX_BOOL  FX_Robot_PLN_MOVL_KeepJ(FX_INT32L RobotSerial, Vect7 startjoints, Vect7
     输出：
         成功：True/1; 失败：False/0
         
-    • 输出点位频率为500Hz
     • 函数规划成功会保存规划的PVT文件，无文件保存则规划失败；或者读函数返回。
     • 该接口是不同于FX_Robot_PLN_MOVL的规划接口，FX_Robot_PLN_MOVL_KeepJ根据起始关节和结束关节规划一条直线路径。
-    
-    
+ 
 
 ###    11. 工具动力学参数辨识
 FX_INT32  FX_Robot_Iden_LoadDyn(FX_INT32 Type,FX_CHAR* path,FX_DOUBLE* mass, Vect3 mr, Vect6 I);
@@ -364,7 +362,6 @@ FX_BOOL  FX_Robot_PLN_MOVLA(FX_INT32L RobotSerial, Vect6 Start_XYZABC, Vect6 End
     输出：
         成功：True/1; 失败：False/0
 
-    • 输出点位频率为500Hz。
     • FX_Robot_PLN_MOVLA的特点在于根据提供的起始目标笛卡尔位姿和终止目标笛卡尔位姿规划一段直线路径点，该接口不约束到达终点时的机器人构型。
 
 ###    15.直线规划，约束机器人气势和结束的各个关节角度（MOVLJA）
@@ -382,7 +379,6 @@ FX_BOOL  FX_Robot_PLN_MOVL_KeepJA(FX_INT32L RobotSerial, Vect7 startjoints, Vect
     输出：
         成功：True/1; 失败：False/0
         
-    • 输出点位频率为500Hz
     • 该接口是不同于FX_Robot_PLN_MOVLA的规划接口，FX_Robot_PLN_MOVL_KeepJA根据起始关节和结束关节规划一条直线路径。
 
 ###    16.MOVL终点位姿处理
@@ -403,6 +399,107 @@ FX_BOOL  FX_Robot_CalEndXYZABC(Vect6 Start_XYZABC, Vect3 Pos_offset, FX_INT32L R
 		2.FX_ROT_EULER_xxx:欧拉角变换，基于末端坐标系旋转
 		3.FX_ROT_FIXED_xxx:固定角变换，基于基坐标系旋转    
     • 本接口输出的结束点位姿可以直接输入直线规划接口进行规划
+
+###    17. 多点MOVL连续规划
+该功能为组合使用接口，共包含三个接口
+
+#### 设置多段规划的起点信息
+FX_BOOL  FX_Robot_PLN_Set_MOVL_Start(FX_INT32L RobotSerial, Vect7 Ref_Joints, Vect6 Start_XYZABC, Vect6 End_XYZABC, 
+                                        FX_DOUBLE Allow_Range, FX_INT32L ZSP_Type, Vect6 ZSP_Para, 
+                                        FX_DOUBLE Vel, FX_DOUBLE Acc, FX_INT32L Freq);
+
+    • 输入当前位置参考关节角度、起始点位姿、结束点位姿、平滑过渡长度、逆运动学零空间约束类型、零空间约束相关参数、直线规划速度及直线规划加速度
+    输入：
+        1. FX_INT32L RobotSerial：0表示左臂，1表示右臂
+        2. Vect7 Ref_Joints:约束了规划的起始关节点信息。单位：度
+        3. Vect6 Start_XYZABC:起始点末端的位姿信息，六维信息，可用正解FX_Robot_Kine_FK接口得到目标末端位姿矩阵，再用FX_Matrix42XYZABCDEG求得XYZABC。（单位：平移为毫米， 旋转为度）
+        4. Vect6 End_XYZABC:终止点末端的位姿信息，六维信息，目标末端点的平移和欧拉旋转使用FX_Robot_CalEndXYZABC自定义输入，可用正解FX_Robot_Kine_FK接口得到目标末端位姿矩阵，再用FX_Matrix42XYZABCDEG求得XYZABC。（单位：平移为mm， 旋转为度）
+        5. FX_DOUBLE Allow_Range:两段路径之间的允许的平滑过渡长度(单位:mm)，Allow_Range=0时，该段路径的结束点位会运动到速度为0,即准确到达，Allow_Range不为0时，速度不会运动到0，而是会与下一段路径以设置的平滑过渡长度为参考，平滑运动到下一段路径。Allow_Range的数值越大，两段路径之间衔接越顺滑，衔接点的位置误差越大，反之Allow_Range的数值越小，衔接点位置误差越小。
+        6. FX_INT32 ZSP_Type:逆运动学零空间约束类型。
+            ZSP_Type=0:逆运动学选择策略为距离输入参考关节角欧式距离最小
+            ZSP_Type=1:逆运动学选解策略为接近参考角的肘平面参数，适用于肘平面需要保持一定姿态的运动过程
+        7. Vect6 ZSP_Para:零空间约束相关参数(详情请参考逆解结构体数据介绍)
+            ZSP_Type=0:ZSP_Para传入长度为6的全零数组，输入其他数值不会生效
+            ZSP_Type=1:ZSP_Para数组中前三位为肘平面切向量，后三位为0。例如：希望肘平面尽量与地面平行，可设置ZSP_para=[0,0,1,0,0,0]。具体选择输入向量可参考KinematicsSDK接口中计算正运动学和零空间(臂角平面)参数的接口说明
+        8. FX_DOUBLE Vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
+        9. FX_DOUBLE ACC:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为1000 mm/s^2
+        10. FX_INT32L Freq:设置内部规划频率(注意：基频设置为1000Hz，下发点位频率若不是基频的整数分频，则默认频率为500Hz)
+    返回值：
+        成功：True/1; 失败：False/0
+
+    • 下发规划点位建议使用ControlSDK中的OnSetPlnCart_A/B接口，若使用该接口，请设置内部规划频率为50Hz（内部规划频率参考接口输入参数10）；
+    • 若使用周期下发，内部规划周期不强制要求为50Hz，但需要设置为基频的整数分频
+    • 该接口可作为单段规划使用，整体功能及输出与MOVLA接口相同，区别在于可以设置逆运动解算的零空间，及调用接口后需要使用FX_Robot_PLN_Get_MOVL_Path接口获取点位
+
+#### 加点
+FX_BOOL  FX_Robot_PLN_Set_MOVL_Next_Point(FX_INT32L RobotSerial, Vect6 Next_XYZABC, FX_DOUBLE Allow_Range, 
+                                            FX_INT32L ZSP_Type, Vect6 ZSP_Para, FX_DOUBLE Vel, FX_DOUBLE Acc);
+
+    • 输入下一目标点位姿、平滑过渡长度、逆运动学零空间约束类型、零空间约束相关参数、直线规划速度及直线规划加速度
+    输入：
+        1. FX_INT32L RobotSerial：0表示左臂，1表示右臂
+        2. Vect6 Next_XYZABC:下一目标点末端的位姿信息，六维信息，目标末端点的平移和欧拉旋转使用FX_Robot_CalEndXYZABC自定义输入，可用正解FX_Robot_Kine_FK接口得到目标末端位姿矩阵，再用FX_Matrix42XYZABCDEG求得XYZABC。（单位：平移为mm， 旋转为度）
+        3. FX_DOUBLE Allow_Range：参考上一接口说明
+        4. FX_INT32 ZSP_Type:参考上一接口说明
+        5. FVect6 ZSP_Para:参考上一接口说明
+        6. FX_DOUBLE Vel:参考上一接口说明
+        7.FX_DOUBLE ACC:参考上一接口说明
+    返回值：
+        成功：True/1; 失败：False/0
+
+    • 该接口中的起点位姿默认为上一运动段的结束点位姿，参考角度为上一运动段的结束点各关节角度
+    • 该接口中重点关注下个目标点的位姿信息、平滑过渡长度信息，以及运动过程中的速度、加速度和逆运动学选解策略
+    • 输出点位频率为50Hz
+
+#### 得到规划轨迹的点集
+FX_BOOL  FX_Robot_PLN_Get_MOVL_Path(FX_INT32L RobotSerial, CPointSet* ret_Pset);
+
+    输入：
+        FX_INT32L RobotSerial：0表示左臂，1表示右臂
+    输出：
+        CPointSet* ret_pset:点位缓存类函数。获取全部规划点位。
+    返回值：
+        成功：True/1; 失败：False/0
+
+### 使用示例（仅包含规划接口的简单示例，不包含初始化、求解XYZABC的详细过程，具体使用方法以showcase为准）
+• 仅包含一个起始点，一个结束点，但是需要定义规划过程中逆运动学的零空间约束参数
+
+    CPointSet ret_pset;
+    FXPLN_Set_MovL_Start(0, refjoints, P1, P2, 0.0, 1, [0,0,1,0,0,0], 100, 200);
+    FXPLN_Get_MovL_Path(0, &ret_pset);
+    • 注意单段使用时，Allow_Range不生效
+    • ret_pset中保存该段路径点位
+
+• 包含一个起始点，后续输入多个点
+
+    CPointSet ret_pset;
+    FXPLN_Set_MovL_Start(0, refjoints, P1, P2, 5.0, 1, [0,0,1,0,0,0], 100, 200);
+    FX_Robot_PLN_Set_MOVL_Next_Point(0, P3, 10.0, 1, [0,0,1,0,0,0], 100, 200);
+    FX_Robot_PLN_Set_MOVL_Next_Point(0, P4, 0.0, 0, [0,0,0,0,0,0], 200, 200);
+    ...
+    FX_Robot_PLN_Set_MOVL_Next_Point(0, Pn, 0.0, , [0,0,0,0,0,0], 200, 200);
+    FX_Robot_PLN_Get_MOVL_Path(0, &ret_pset);
+    • 注意单段使用时，Allow_Range不生效
+    • ret_pset中包含全部运动过程中的点位
+
+###     18. 直线优先规划
+FX_BOOL FX_Robot_PLN_MOV_Target(FX_INT32L RobotSerial, Vect6 Start_XYZABC, Vect6 End_XYZABC,
+						            Vect7 Ref_Joints, FX_DOUBLE Vel, FX_DOUBLE ACC, FX_INT32L Freq, CPointSet *ret_pset);
+
+    • 采用“直线优先、关节兜底”的运动规划策略。规划器首先尝试生成笛卡尔空间直线轨迹，若因关节限位、逆解不可达或关节速度超限导致直线规划失败，则自动退化为关节空间规划，保证机器人能够到达目标点位
+
+    • 输入RobotSerial（参数含义参考初始化参数部分）、起始点位姿、结束点位姿、当前位置参考关节角度、直线规划速度及直线规划加速度，输出为点位缓存类函数
+    输入：
+        1. FX_INT32L RobotSerial：0，左臂；1，右臂
+        2. Start_XYZABC起始点末端的位姿信息，六维信息，可用正解FX_Robot_Kine_FK接口得到目标末端位姿矩阵，再用FX_Matrix42XYZABCDEG求得XYZABC。（单位：平移为毫米， 旋转为度）
+        3. End_XYZABC终止点末端的位姿信息，六维信息，目标末端点的平移和欧拉旋转使用FX_Robot_CalEndXYZABC自定义输入，可用正解FX_Robot_Kine_FK接口得到目标末端位姿矩阵，再用FX_Matrix42XYZABCDEG求得XYZABC。（单位：平移为毫米， 旋转为度）
+        4. Ref_Joints约束了规划的起始关节点信息。单位：度。 
+        5. Vel 约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
+        6. ACC 约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为1000 mm/s^2
+        7. Freq 设置内部规划频率(注意：基频设置为1000Hz，下发点位频率若不是基频的整数分频，则默认频率为500Hz)
+        8. CPointSet* ret_pset 点位缓存类函数
+    输出：
+        成功：True/1; 失败：False/0 
 
 # 二、案例脚本
 ## C++开发的使用编译见：
