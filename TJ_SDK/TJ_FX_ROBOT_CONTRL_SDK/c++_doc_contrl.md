@@ -284,10 +284,10 @@ bool OnGetBuf(DCSS * ret);
         FX_FLOAT    m_EST_Joint_Firc_Dot[7];	///* 关节力扰动估计值微分 */				70-76
         FX_FLOAT    m_EST_Joint_Force[7];	///* 关节力扰动估计值 */						80-86
         FX_FLOAT    m_EST_Cart_FN[6];		///* 末端扰动估计值 */						90-95
-        FX_CHAR     m_TipDI;                ///* 是否按住拖动按钮信号 */	
-        FX_CHAR     m_LowSpdFlag;			///* 机器人停止运动标志， 可用于判断是否运动到位。 */	
+        FX_UCHAR    m_TipDI;                ///* 是否按住拖动按钮信号 */	
+        FX_UCHAR    m_LowSpdFlag;			///* 机器人停止运动标志， 可用于判断是否运动到位。 */	
         FX_CHAR     m_pad[1];               ///* 填充，没有实义 */
-	    FX_CHAR		m_TrajState;			//规划状态： 0: no traj; 1: receving; 2: recevied; >=3: running traj
+	    FX_UCHAR	m_TrajState;			//规划状态： 0: no traj; 1: receving; 2: recevied; >=3: running traj
     }RT_OUT; ///* 机器人反馈数据*/
     
     typedef struct
@@ -725,13 +725,8 @@ bool OnSetJointKD_A(double K[7], double D[7])
 
 bool OnSetJointKD_B(double K[7], double D[7])
 
-    K 刚度 N*m/rad , 设置每个轴的的力为刚度系数。 如K=[2，2,2,1,1,1,1]，第1到3轴有2N作为刚度系数参与控制计算，第4到7轴有1N作为刚度系数参与控制计算。
-    D 阻尼 N*m/（rad/s)，设置每个轴的的阻尼系数。
-
-    #关节阻抗时，需更低刚度避免震动，且希望机械臂有顺从性，因此采用低刚度配低阻尼。
-    1-7关节刚度不超过2
-    1-7关节阻尼0-1之间
-
+    K 设置每个轴的的力为刚度参数(N*m/deg)。 如K=[2,2,2,1,1,1,1]，第1到3轴有2N作为刚度系数参与控制计算，第4到7轴有1N作为刚度系数参与控制计算。
+    D 阻尼比例系数，设置范围0~1。
 	注：1.参数在不同构型下的表现不同，请自行调节值到合适范围
 
 ## （16）设置指定手臂的坐标阻抗参数
@@ -739,17 +734,17 @@ bool OnSetCartKD_A(double K[7], double D[7], int type)
 
 bool OnSetCartKD_B(double K[7], double D[7], int type)
 
-    K[0]-k[2] N*m        x,y,z 平移方向每米的控制力
-    K[3]-k[5] N*m/rad    rx,ry,rz 旋转弧度的控制力
-    K[6] 零空间总和刚度系数 N*m/rad  
-    D[0]-D[5]  阻尼比例系数    
-    D[6] 零空间总和阻尼比例系数  
+    K[0]-k[2] x,y,z 平移方向每米的控制力（ N*m ）
+    K[3]-k[5] rx,ry,rz 旋转弧度的控制力（N*m/rad）
+    K[6] 零空间总和刚度参数（N*m/rad）  
+    D[0]-D[5] 阻尼比例系数，设置范围0~1
+    D[6] 零空间总和阻尼比例系数，设置范围0~1
 
     # 在笛卡尔阻抗模式下：
-            刚度系数： 1-3平移方向刚度系数不超过12000, 4-6旋转方向不超过600。 零空间刚度系数不超过20
-            阻尼系数： 平移和旋转阻尼系数0-1之间。 零空间阻尼系数不超过1
+            刚度系数： 1-3平移方向刚度系数不超过12000, 4-6旋转方向不超过600。 零空间刚度范围20~100
+            阻尼系数： 平移和旋转阻尼系数0~1之间 
 
-            零空间控制是保持末端固定不动，手臂角度运动的控制方式。接口未开放
+            零空间控制是保持末端固定不动，手臂角度运动的控制方式。
 			注：1.参数在不同构型下的表现不同，请自行调节值到合适范围
 
 

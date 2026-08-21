@@ -2,6 +2,8 @@
 // 标准模式：先睡到绝对节拍点，再执行本拍工作（无累积漂移）
 #pragma once
 
+#include "common.hpp"
+
 #include <cerrno>
 #include <cstdint>
 #include <ctime>
@@ -13,7 +15,7 @@ struct CycleTiming {
 
 class PeriodicLoop {
 public:
-    explicit PeriodicLoop(int period_us = 1000) : period_ns_(period_us * 1000LL) {}
+    explicit PeriodicLoop(int period_us = kControlPeriodUs) : period_ns_(period_us * 1000LL) {}
 
     // 重置单调时钟锚点；首拍不等待，立即开始
     void ResetAnchor() {
@@ -66,8 +68,16 @@ public:
 
 private:
     static int64_t DiffUs(const timespec& a, const timespec& b) {
-        return (a.tv_sec - b.tv_sec) * 1000000LL +
-               (a.tv_nsec - b.tv_nsec) / 1000LL;
+        const int64_t us =
+            (a.tv_sec - b.tv_sec) * 1000000LL + (a.tv_nsec - b.tv_nsec) / 1000LL;
+        const int64_t rem = (a.tv_nsec - b.tv_nsec) % 1000LL;
+        if (rem >= 500) {
+            return us + 1;
+        }
+        if (rem <= -500) {
+            return us - 1;
+        }
+        return us;
     }
 
     static void AddNs(timespec& ts, int64_t ns) {

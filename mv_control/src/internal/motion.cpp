@@ -13,7 +13,6 @@ namespace {
 
 constexpr double kSmall = 1e-6;
 constexpr double kLittle = 0.001;
-constexpr double kStopTime = 0.2;
 
 CubicCoef CalCubic(double ps, double vs, double pe, double ve, double t) {
     CubicCoef c;
@@ -102,7 +101,7 @@ void MotionStop::InitPlan(const RobotState& ref_rs) {
         }
     }
     acc_norm_ = sign * acc_norm_;
-    stopacc_ = std::max(speed_norm_ / kStopTime, std::abs(acc_norm_));
+    stopacc_ = std::max(speed_norm_ / kMotionStopDurationS, std::abs(acc_norm_));
     for (int i = 0; i < DOF; ++i) {
         if (std::abs(axis_t_(i)) > kSmall) {
             stopacc_ = std::min(stopacc_, limit_.max_a(i) / std::abs(axis_t_(i)));
@@ -471,12 +470,10 @@ void MotionServoP::InitPlan(const Pose& target_pose, const RobotState& ref_rs,
     t_ = kStreamServoPeriod;
     t_cur_ = kControlDt;
 
-    V6d vs = v_target_;
-    ClampCartVel(vs, limit_);
+    const V6d vs = v_target_;
     V6d ve = V6d::Zero();
     ve.head<3>() = (p_cmd_.pos - p_cmd_last_.pos) / t_;
     ve.tail<3>() = QuatLogLocal(p_cmd_last_.quat, p_cmd_.quat) / t_;
-    ClampCartVel(ve, limit_);
     V6d err_vec = V6d::Zero();
     err_vec.head<3>() = p_cmd_.pos - p_cmd_last_.pos;
     err_vec.tail<3>() = QuatLogLocal(p_cmd_last_.quat, p_cmd_.quat);
@@ -500,12 +497,10 @@ void MotionServoP::RePlan(const Pose& target_pose, const RobotState& ref_rs,
     t_ = kStreamServoPeriod;
     t_cur_ = kControlDt;
 
-    V6d vs = v_target_;
+    const V6d vs = v_target_;
     V6d ve = V6d::Zero();
     ve.head<3>() = (p_cmd_.pos - p_cmd_last_.pos) / t_;
     ve.tail<3>() = QuatLogLocal(p_cmd_last_.quat, p_cmd_.quat) / t_;
-    ClampCartVel(vs, limit_);
-    ClampCartVel(ve, limit_);
     V6d err_vec = V6d::Zero();
     err_vec.head<3>() = p_cmd_.pos - p_cmd_last_.pos;
     err_vec.tail<3>() = QuatLogLocal(p_cmd_last_.quat, p_cmd_.quat);
@@ -543,7 +538,6 @@ void MotionServoP::RunPlan(RobotState& ref_rs) {
         p_target_.pos = p_cmd_last_.pos + pos_vec;
         p_target_.quat = (p_cmd_last_.quat * QuatExp(ori_vec)).normalized();
         v_target_ = prof_v;
-        ClampCartVel(v_target_, limit_);
     } else {
         p_target_ = p_cmd_;
         v_target_ = v_cmd_;
@@ -604,10 +598,18 @@ void MotionServoPByPico::InitPlan(const Pose& pico_pose, const RobotState& ref_r
     alignas(16) Pose abs_target;
     PicoToAbsTarget(pico_pose, abs_target);
     servo_.InitPlan(abs_target, ref_rs, ref_q);
+    if (!servo_.IsInitialized()) {
+        ResetSession();
+    }
 }
 
 void MotionServoPByPico::RePlan(const Pose& pico_pose, const RobotState& ref_rs,
                                 const V7d& ref_q) {
+    // FK/IK 失败后 session 或样条 init 被清：必须重新 InitPlan 锚定 ref_pico/robot_anchor
+    if (!session_active_ || !servo_.IsInitialized()) {
+        InitPlan(pico_pose, ref_rs, ref_q);
+        return;
+    }
     ++MvDiag::ServoPicoTraceGet().arm[arm_serial_].replan;
     alignas(16) Pose abs_target;
     PicoToAbsTarget(pico_pose, abs_target);
@@ -622,4 +624,7 @@ void MotionServoPByPico::RunPlan(RobotState& ref_rs) {
     }
     ++trace.run_session;
     servo_.RunPlan(ref_rs);
+    if (!servo_.IsInitialized()) {
+        ResetSession();
+    }
 }

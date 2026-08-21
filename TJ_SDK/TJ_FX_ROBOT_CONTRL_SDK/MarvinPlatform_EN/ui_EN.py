@@ -27,6 +27,54 @@ def get_app_dir():
         return os.path.dirname(sys.executable)
     return os.path.dirname(os.path.abspath(__file__))
 
+
+def _mv_kd_cfg_type_label(config_path: str) -> str:
+    """读取 MvKDCfg 首行机型代号并转为可读标签。"""
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            first = f.readline().strip()
+        type_id = int(first.split(",")[0])
+    except (OSError, ValueError, IndexError):
+        return "未知"
+    if type_id == 1007:
+        return "SRS"
+    if type_id == 1017:
+        return "CCS"
+    return f"TYPE={type_id}"
+
+
+def prompt_select_mv_kd_config(project_root: str) -> str:
+    """终端数字选择 CommonConfig 下的机型配置文件。"""
+    common_dir = os.path.join(project_root, "CommonConfig")
+    candidates = sorted(glob.glob(os.path.join(common_dir, "*.MvKDCfg")))
+    if not candidates:
+        print(f"ERROR: 未找到配置文件: {common_dir}/*.MvKDCfg")
+        sys.exit(1)
+
+    if not sys.stdin.isatty():
+        chosen = candidates[0]
+        print(f"[config] 非交互终端，自动使用: {chosen}")
+        return chosen
+
+    print("\n========== 请选择机型配置文件 ==========")
+    for idx, path in enumerate(candidates, start=1):
+        name = os.path.basename(path)
+        label = _mv_kd_cfg_type_label(path)
+        print(f"  [{idx}] {name}  ({label})")
+    print("========================================\n")
+
+    while True:
+        raw = input(f"请输入序号 [1-{len(candidates)}]: ").strip()
+        if not raw.isdigit():
+            print("无效输入，请输入数字。")
+            continue
+        pick = int(raw)
+        if 1 <= pick <= len(candidates):
+            chosen = candidates[pick - 1]
+            print(f"已选择: {chosen}\n")
+            return chosen
+        print(f"序号超出范围，请输入 1 到 {len(candidates)}。")
+
 class DataSubscriber:
     def __init__(self, callback):
         self.callback = callback
@@ -7192,12 +7240,7 @@ if __name__ == "__main__":
     '''
     _script_dir = get_app_dir()
     project_root = os.path.dirname(_script_dir)
-    config_pattern = os.path.join(project_root, "CommonConfig/config", '*.MvKDCfg')
-    config_files = glob.glob(config_pattern)
-    if not config_files:
-        print(f"ERROR: No .MvKDCfg files found in {os.path.join(project_root, 'CommonConfig/config')}")
-        sys.exit(1)
-    config_path = config_files[0]
+    config_path = prompt_select_mv_kd_config(project_root)
     dcss = DCSS()
     robot = Marvin_Robot()
 

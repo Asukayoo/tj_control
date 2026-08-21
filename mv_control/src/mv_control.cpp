@@ -6,8 +6,12 @@
 #include "internal/sdk_map.hpp"
 
 #include <array>
+#include <chrono>
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <memory>
+#include <string>
 
 namespace {
 
@@ -29,7 +33,39 @@ RobotState MakeZeroRobotState() {
 
 }  // namespace
 
-MVControl::MVControl() : left_(0), right_(1) {}
+// #region agent log
+namespace {
+void AgentDbgLog(const char* hypothesis_id, const char* location, const char* message,
+                 const std::string& data_json = "{}") {
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch())
+                        .count();
+    std::ofstream out("/home/yxc/tj_control/.cursor/debug-c463d8.log", std::ios::app);
+    if (!out) {
+        return;
+    }
+    out << "{\"sessionId\":\"c463d8\",\"runId\":\"pre-fix\",\"hypothesisId\":\""
+        << hypothesis_id << "\",\"location\":\"" << location << "\",\"message\":\""
+        << message << "\",\"data\":" << data_json << ",\"timestamp\":" << ms << "}\n";
+}
+bool AgentMallocOk(std::size_t n) {
+    void* p = std::malloc(n);
+    if (p == nullptr) {
+        return false;
+    }
+    std::free(p);
+    return true;
+}
+}  // namespace
+// #endregion
+
+MVControl::MVControl() : left_(0), right_(1) {
+    // #region agent log
+    AgentDbgLog("B", "mv_control.cpp:MVControl()", "ctor_done",
+                std::string("{\"malloc64\":") + (AgentMallocOk(64) ? "1" : "0") +
+                    ",\"malloc1112\":" + (AgentMallocOk(1112) ? "1" : "0") + "}");
+    // #endregion
+}
 
 MVControl::~MVControl() {
     if (hw_) {
@@ -61,7 +97,7 @@ void MVControl::_FillArmWrite(Robot& arm, HwArmWrite& slot) {
         if (!is_sim_ && !hw_->PrepareDeferredState(hw_cmd, is_stationary)) {
             return;  // 未就绪，保留队列，下周期再试
         }
-        arm.impl_->pending_state_queue_.pop_front();
+        // 等 Write 成功（udp_sent）后再 pop；ClearSet 失败时否则会丢 Disable/Enable
         slot.has_state = true;
         slot.state = hw_cmd;
     }
@@ -100,29 +136,71 @@ void MVControl::_FillArmWrite(Robot& arm, HwArmWrite& slot) {
 }
 
 bool MVControl::Init(const char* config_path, bool is_sim,
-                     std::shared_ptr<HwInterface> hw) {
+                     std::shared_ptr<HwInterface> hw, const char* urdf_override) {
     if (connected_) {
         return is_sim_ == is_sim;
     }
 
+    // #region agent log
+    AgentDbgLog("A", "mv_control.cpp:Init", "before_make_unique_MvConfig",
+                std::string("{\"malloc64\":") + (AgentMallocOk(64) ? "1" : "0") +
+                    ",\"malloc4k\":" + (AgentMallocOk(4096) ? "1" : "0") +
+                    ",\"sizeof_MvConfig\":" + std::to_string(sizeof(MvConfig)) +
+                    ",\"sizeof_ImpConfig\":" + std::to_string(sizeof(ImpConfig)) + "}");
+    // #endregion
     auto cfg = std::make_unique<MvConfig>();
+    // #region agent log
+    AgentDbgLog("A", "mv_control.cpp:Init", "after_make_unique_MvConfig",
+                std::string("{\"malloc64\":") + (AgentMallocOk(64) ? "1" : "0") +
+                    ",\"imp_joint_K0\":" + std::to_string(cfg->imp.joint.K(0)) +
+                    ",\"imp_cart_K0\":" + std::to_string(cfg->imp.cart.K(0)) + "}");
+    // #endregion
     if (!LoadMvConfig(config_path, *cfg)) {
+        // #region agent log
+        AgentDbgLog("A", "mv_control.cpp:Init", "LoadMvConfig_failed", "{}");
+        // #endregion
         return false;
     }
+    // #region agent log
+    AgentDbgLog("A", "mv_control.cpp:Init", "after_LoadMvConfig",
+                std::string("{\"malloc64\":") + (AgentMallocOk(64) ? "1" : "0") +
+                    ",\"imp_joint_K0\":" + std::to_string(cfg->imp.joint.K(0)) +
+                    ",\"runId\":\"post-fix\"}");
+    // #endregion
 
     is_sim_ = is_sim;
     connect_cfg_ = cfg->connect;
 
     left_._ApplyConfig(cfg->left, cfg->servo, cfg->connect, cfg->imp);
+    // #region agent log
+    AgentDbgLog("C", "mv_control.cpp:Init", "after_ApplyConfig_left",
+                std::string("{\"malloc64\":") + (AgentMallocOk(64) ? "1" : "0") + "}");
+    // #endregion
     right_._ApplyConfig(cfg->right, cfg->servo, cfg->connect, cfg->imp);
+    // #region agent log
+    AgentDbgLog("C", "mv_control.cpp:Init", "after_ApplyConfig_right",
+                std::string("{\"malloc64\":") + (AgentMallocOk(64) ? "1" : "0") + "}");
+    // #endregion
 
-    const char* urdf =
-        cfg->urdf_path.empty() ? nullptr : cfg->urdf_path.c_str();
+    const char* urdf = nullptr;
+    if (urdf_override != nullptr && urdf_override[0] != '\0') {
+        urdf = urdf_override;
+    } else if (!cfg->urdf_path.empty()) {
+        urdf = cfg->urdf_path.c_str();
+    }
+    // #region agent log
+    AgentDbgLog("E", "mv_control.cpp:Init", "before_IkSolver",
+                std::string("{\"urdf_null\":") + (urdf == nullptr ? "1" : "0") + "}");
+    // #endregion
     if (urdf != nullptr && !IkSolver::InitFromUrdf(urdf)) {
         left_.impl_->error_code_ = ErrorCode::InitError;
         right_.impl_->error_code_ = ErrorCode::InitError;
         return false;
     }
+    // #region agent log
+    AgentDbgLog("E", "mv_control.cpp:Init", "after_IkSolver",
+                std::string("{\"malloc64\":") + (AgentMallocOk(64) ? "1" : "0") + "}");
+    // #endregion
     if (!left_._Init(is_sim_) || !right_._Init(is_sim_)) {
         return false;
     }
@@ -234,6 +312,16 @@ void MVControl::Run() {
 
     HwWriteResult wout{};
     hw_->Write(wr, wout);
+
+    const bool commit_state = is_sim_ ? wout.ok : wout.udp_sent;
+    if (commit_state) {
+        if (wr.left.has_state && !left_.impl_->pending_state_queue_.empty()) {
+            left_.impl_->pending_state_queue_.pop_front();
+        }
+        if (wr.right.has_state && !right_.impl_->pending_state_queue_.empty()) {
+            right_.impl_->pending_state_queue_.pop_front();
+        }
+    }
 
     if (is_sim_ && (wout.had_state || wout.had_stream)) {
         hw_->Read(snap);

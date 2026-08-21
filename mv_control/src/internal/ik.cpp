@@ -12,6 +12,7 @@
 #include <kdl_parser/kdl_parser.hpp>
 
 #include <array>
+#include <cstdlib>
 #include <cstdio>
 #include <memory>
 
@@ -22,11 +23,21 @@ bool g_kine_ready = false;
 constexpr double kM2Mm = 1000.0;
 constexpr const char* kBaseLink = "Link_Base";
 constexpr const char* kTipLinks[2] = {"TCP_Link_L", "TCP_Link_R"};
+constexpr const char* kDefaultAmentPrefix = "/opt/ros/jazzy";
 
 constexpr unsigned int kNrMaxIter = 100;
 constexpr double kNrEps = 1e-6;  // KDL 内部单位：m / rad
 constexpr double kIkPosTolMm = 5.0;
 constexpr double kIkOriTolRad = 0.087;  // ~5 deg
+
+// kdl_parser/urdf 经 pluginlib 查 ament 索引；未 source ROS 时 AMENT 为空会崩
+void EnsureAmentPrefixPath() {
+    const char* cur = std::getenv("AMENT_PREFIX_PATH");
+    if (cur != nullptr && cur[0] != '\0') {
+        return;
+    }
+    setenv("AMENT_PREFIX_PATH", kDefaultAmentPrefix, 1);
+}
 
 std::array<KDL::Chain, 2> g_chains;
 std::array<std::unique_ptr<KDL::ChainFkSolverPos_recursive>, 2> g_fk;
@@ -135,6 +146,7 @@ bool IkSolver::InitFromUrdf(const char* urdf_path) {
     if (g_kine_ready) {
         return true;
     }
+    EnsureAmentPrefixPath();
     KDL::Tree tree;
     if (!kdl_parser::treeFromFile(urdf_path, tree)) {
         return false;

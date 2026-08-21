@@ -1,6 +1,7 @@
 #include "config.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <filesystem>
 #include <yaml-cpp/yaml.h>
 
@@ -212,4 +213,29 @@ bool LoadMvConfig(const char* yaml_path, MvConfig& out) {
     } catch (const YAML::Exception&) {
         return false;
     }
+}
+
+bool ResolveRobotModelUrdf(const char* config_path, const char* model,
+                           std::string& out) {
+    if (config_path == nullptr || model == nullptr) {
+        return false;
+    }
+    const std::filesystem::path cfg(config_path);
+    const std::filesystem::path repo_root = cfg.parent_path().parent_path().parent_path();
+    std::filesystem::path urdf;
+    if (std::strcmp(model, "696") == 0) {
+        urdf = repo_root / "urdf/Marvin_M6S_CCS_696_ urdf/urdf/"
+                         "Marvin M6-S-CCS-696-V4.0_Base_and_Stand_Asm urdf.urdf";
+    } else if (std::strcmp(model, "615") == 0) {
+        urdf = repo_root / "urdf/Marvin_M3S_CCS_615_urdf/urdf/"
+                         "Marvin_M3-S-CCS-615-V2.0_Base_and_Stand_Asm.urdf";
+    } else {
+        return false;
+    }
+    urdf = urdf.lexically_normal();
+    if (!std::filesystem::is_regular_file(urdf)) {
+        return false;
+    }
+    out = urdf.string();
+    return true;
 }

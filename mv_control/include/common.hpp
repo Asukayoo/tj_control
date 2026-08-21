@@ -9,9 +9,67 @@ constexpr int DOF = 7;
 constexpr double PI = 3.14159265358979323846;
 constexpr double D2R = PI / 180.0;
 constexpr double R2D = 180.0 / PI;
-constexpr double kControlDt = 0.001;
-// Servo 内部三次样条窗口（1kHz 下 40 周期 = 40ms）；与外部指令频率无关
-constexpr int kStreamServoCycles = 40;
+constexpr double kControlDt = 0.002;
+constexpr int kControlHz = static_cast<int>(1.0 / kControlDt + 0.5);
+constexpr int kControlPeriodUs = static_cast<int>(kControlDt * 1e6 + 0.5);
+constexpr int64_t kControlPeriodUsLo = (kControlPeriodUs * 9) / 10;
+constexpr int64_t kControlPeriodUsHi = (kControlPeriodUs * 11) / 10;
+constexpr int kControlCatchUpPeriodUs = kControlPeriodUs / 2;
+constexpr int kControlWorkStallUs =
+    static_cast<int>(static_cast<double>(kControlPeriodUs) * 1.5 + 0.5);
+constexpr int kControlCyclesPerSecond = kControlHz;
+constexpr int kControlMaxCycles5Min = kControlHz * 300;
+
+// 墙钟时长 [s] → 控制周期数（≥1）
+constexpr int ControlCyclesFromSeconds(double sec) {
+    const int n = static_cast<int>(sec / kControlDt + 0.5);
+    return n < 1 ? 1 : n;
+}
+
+constexpr int ControlMsFromSeconds(double sec) {
+    const int ms = static_cast<int>(sec * 1000.0 + 0.5);
+    return ms < 1 ? 1 : ms;
+}
+
+// 墙钟语义（秒）→ 周期/ms（随 Ts 缩放；不含 Servo 样条插值窗口）
+constexpr double kWallTransitionTimeoutS = 1.0;
+constexpr double kWallSdkFrameStaleS = 0.020;
+constexpr double kWallSdkInitPollWindowS = 0.005;
+constexpr double kWallOpenClearRetryS = 0.010;
+constexpr double kWallSdkSendSettleS = 0.010;
+constexpr double kWallVelEstSendWaitS = 0.050;
+constexpr double kWallVelEstRetryBudgetS = 0.100;
+constexpr double kWallMotionStopS = 0.200;
+constexpr double kWallServoErrPollS = 1.0;
+
+constexpr int kTransitionTimeoutCycles =
+    ControlCyclesFromSeconds(kWallTransitionTimeoutS);
+constexpr int kSdkFrameStaleRunCycles =
+    ControlCyclesFromSeconds(kWallSdkFrameStaleS);
+constexpr int kSdkFramePollTries =
+    ControlCyclesFromSeconds(kWallSdkInitPollWindowS);
+constexpr int kOpenClearRetries = ControlCyclesFromSeconds(kWallOpenClearRetryS);
+constexpr int kVelEstSlotRetries =
+    ControlCyclesFromSeconds(kWallVelEstRetryBudgetS);
+constexpr int kMotionStopCycles = ControlCyclesFromSeconds(kWallMotionStopS);
+constexpr double kMotionStopDurationS = kMotionStopCycles * kControlDt;
+constexpr int kServoErrPollCyclesDefault =
+    ControlCyclesFromSeconds(kWallServoErrPollS);
+
+// SDK FX_OnSetVelEstStep：轨迹/指令发送周期(ms)；false=Init 不发（屏蔽 1 周期速度前瞻）
+constexpr bool kEnableVelEstStep = true;
+constexpr int kVelEstStepMs = static_cast<int>(kControlDt * 1000.0 + 0.5);
+
+constexpr int kControlPeriodMs = kVelEstStepMs;
+constexpr int kInitPollSleepMs = kControlPeriodMs;
+constexpr int kSdkSendSleepMs = ControlMsFromSeconds(kWallSdkSendSettleS);
+constexpr int kVelEstSlotSleepMs = kControlPeriodMs;
+constexpr long kVelEstSendWaitMs = ControlMsFromSeconds(kWallVelEstSendWaitS);
+
+// Servo 内部三次样条窗口（固定 40ms）；与外部指令频率无关
+constexpr double kStreamServoWindowS = 0.040;
+constexpr int kStreamServoCycles =
+    static_cast<int>(kStreamServoWindowS / kControlDt + 0.5);
 constexpr double kStreamServoPeriod = kStreamServoCycles * kControlDt;
 
 using V3d = Eigen::Vector3d;
@@ -100,6 +158,7 @@ enum class ErrorCode {
 };
 
 struct JointLimit {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     V7d max_v;
     V7d max_a;
     V7d max_j;

@@ -16,9 +16,9 @@
 **记录与发布分离（test_rt_teleop）**：
 
 - **对外 UDP 发布关节**：每 1 kHz 周期 `sendto` 一次（112 B `<14d>`），供 PyBullet 实时可视化。
-- **数据记录**：每 **50 Hz**（每 20 个 1 kHz 周期）向 `RunRecorder` **内存** `Push` 一条 `CycleSample`；循环内**不写盘**。
-- **落盘时机**：程序结束（正常退出 / Ctrl+C / 异常后 `catch`）统一调用 `ExportSessionCsv`，输出格式与 `test_enable` / `test_servo` **完全一致**（8 个 joint/cart CSV + `timing.csv`）。
-
+- **数据记录**：每 **50 Hz**（每 20 个 1 kHz 周期）向 `RunRecorder` / `PicoRecorder` **内存** `Push`；循环内**不写盘**。
+- **落盘时机**：程序结束（正常退出 / Ctrl+C 收尾后）统一导出到 `TJ_DATA_DEFAULT=data/test_rt_teleop`（可用位置参数覆盖）；`--sim`/`--hw` 不影响落盘。
+- **落盘内容**：8 个 joint/cart CSV + `timing.csv`（与 `test_enable`/`test_servo` 一致）+ `pico_teleop.csv` + `run_meta.txt` + 周期/运动诊断文件（见 §5.2.1）。
 约束与约定（沿用现有代码）：
 
 - Pico 位姿：`[x,y,z, qx,qy,qz,qw]`，**位置单位 m**；`ServoPByPico` 入参 `Pose.pos` 为 **mm**，四元数 **wxyz**（见 `test_servo.cpp::MakePoseFromCsvM`）。
@@ -43,9 +43,9 @@ flowchart LR
         SUB_P["UDP 订阅 Pico"]
         LOOP["1 kHz 控制循环"]
         SRV["ServoPByPico<br/>扳机=1 时 50Hz"]
-        REC["RunRecorder<br/>内存 Push 50Hz"]
+        REC["RunRecorder + PicoRecorder<br/>内存 Push 50Hz"]
         PUB_J["UDP 发布关节<br/>1 kHz"]
-        EXP["ExportCsv<br/>程序结束"]
+        EXP["退出时落盘<br/>CSV + diag"]
         SUB_P --> LOOP --> SRV
         LOOP --> REC
         LOOP --> PUB_J
@@ -77,7 +77,8 @@ test_rt_teleop @ 1kHz:
     扳机松开: 对应臂 ServoPByPico(pose, false) 结束 session（边沿触发）
 
 程序结束（try 块外 / catch 后统一路径）:
-    teardown → ExportSessionCsv(out_dir) → 写 left/right_ref/resp_joint/cart + timing.csv
+    teardown → ExportSessionCsv + ExportPicoCsv + 诊断落盘
+    → left/right_ref/resp_joint/cart + timing + pico_teleop + run_meta + period_* + diag_*
 
 PyBullet @ 1kHz:
     非阻塞收关节包，resetJointState 刷新
@@ -216,20 +217,38 @@ python -m python.teleop.pico_udp_publisher \
      } catch (std::exception&) { loop_error=true }
        catch (...) { loop_error=true }
    - teardown：ServoPByPico(false) → GoHome → Disable
-   - ExportSessionCsv(out_dir)   // 无论正常/中断/异常，有样本即写盘
+   - ExportSessionCsv + ExportPicoCsv + WriteRunMeta + period/diag 落盘
 ```
 
-#### 5.2.1 记录策略（50 Hz，格式不变）
+#### 5.2.1 记录策略与 `data/test_rt_teleop/` 约定
 
-与 `test_servo` / `test_enable` 共用 `CycleSample` + `ExportSessionCsv`（`recorder.hpp` / `recorder.cpp`），**字段与 CSV 列名不变**：
+默认 `out_dir`：`data/test_rt_teleop`（`TJ_DATA_DEFAULT`）。最长约 `kCycleMax=300000` 拍（≈5 min @1kHz）；50Hz 记录预留约 15000 条。同名文件 `fopen(..., "w")` **覆盖**。
 
-| 文件 | 内容 |
-|------|------|
-| `left/right_ref_joint.csv` | `cycle, q0..q6` [rad] |
-| `left/right_resp_joint.csv` | 同上 |
-| `left/right_ref_cart.csv` | `cycle, px,py,pz, qw,qx,qy,qz` |
-| `left/right_resp_cart.csv` | 同上 |
-| `timing.csv` | `cycle, phase_packed, period_us, overrun_us` |
+**频率分层**
+
+| 层级 | 频率 | 说明 |
+|------|------|------|
+| 控制环 `PeriodicLoop(1000)` | 1000 Hz | 关节 UDP、使能/运动状态机 |
+| `ServoPByPico` | 50 Hz | 每 20 个 1kHz 周期一次 |
+| CSV / Pico 记录 | 50 Hz | `cycle % 20 == 0` 时 `PushRecordSample` |
+| 周期抖动统计 | 1000 Hz | 每拍 `CollectCycleTiming`；偏离 [900,1100] µs → `period_abnormal.csv` |
+| 诊断事件 | 事件驱动 | `MvDiag` 回调，容量约 5 万条 |
+
+与 `test_servo` / `test_enable` 共用 `CycleSample` + `ExportSessionCsv`（`recorder.hpp` / `recorder.cpp`），关节/笛卡尔 **字段与 CSV 列名不变**；`test_rt_teleop` 额外落盘 Pico 与诊断：
+
+| 文件 | 频率/时机 | 内容 |
+|------|-----------|------|
+| `left/right_ref_joint.csv` | 50 Hz | `cycle, q0..q6` [rad] |
+| `left/right_resp_joint.csv` | 50 Hz | 同上 |
+| `left/right_ref_cart.csv` | 50 Hz | `cycle, px,py,pz, qw,qx,qy,qz` |
+| `left/right_resp_cart.csv` | 50 Hz | 同上 |
+| `timing.csv` | 50 Hz | `cycle, phase_packed, period_us, overrun_us` |
+| `pico_teleop.csv` | 50 Hz | 双手位姿 [m]+qwxyz、扳机、`seq`/`valid`/`fresh` |
+| `run_meta.txt` | 退出时 | `servo_hz=50`、`record_hz=50`、`joint_udp_hz=1000`、端口与样本数 |
+| `period_summary.txt` | 1 kHz 统计 | p50/p99、overrun 等 |
+| `period_abnormal.csv` | 异常拍 | 偏离 [900, 1100] µs 的周期 |
+| `diag_events.csv` / `diag_summary.txt` | 事件 | IK/运动诊断 |
+| `teleop_diag.txt` | 退出时 | 遥操作诊断摘要（含 ServoPico trace） |
 
 实现要点：
 
@@ -238,23 +257,23 @@ constexpr int kRecordHz = 50;
 constexpr int kRecordPeriodCycles = 1000 / kRecordHz;  // 20
 
 // 容量按 50Hz 估算，非 1kHz 全量
-session.ReserveRecorder(kCycleMax / kRecordPeriodCycles);
+recorder.Reserve(kCycleMax / kRecordPeriodCycles);
+pico_recorder.Reserve(kCycleMax / kRecordPeriodCycles);
 
 // 1 kHz 热路径
 ctrl.Run();
 PublishJointsUdp(ctrl);                    // 每周期
+CollectCycleTiming(...);                   // 每周期
 
 if (cycle % kRecordPeriodCycles == 0) {    // 50 Hz
-    CycleSample s = MakeSample(ctrl, cycle, phase, timing, stats);
-    if (!recorder.Push(s)) { loop_error = true; break; }
+    if (!PushRecordSample(...)) { loop_error = true; break; }
 }
 ```
 
 - **不**在循环内 `fopen` / `fprintf`；与现有 test 一致，热路径仅 `Push`。
 - `cycle` 字段仍写**真实 1 kHz 周期号**（如 20、40、60…），便于与 Servo 调用对齐。
 - `period_us` / `overrun_us` 取**该记录时刻**当周期的定时统计（与 `RunSession::Step` 语义一致）。
-- 若需复用 `FillSampleFromControl`，可将 `run_session.cpp` 中填充逻辑抽为 `recorder.hpp` 内联函数，或给 `RunSession` 增加 `Step(..., bool record_this_cycle)`；**不改变 `CycleSample` 布局**。
-
+- 无 Pico 数据时 `ExportPicoCsv` 可能 WARN；有 `RunRecorder` 样本时机器人 CSV 仍导出。
 #### 5.2.2 try-catch 与结束保存
 
 结构对齐 `test_servo.cpp`：
@@ -282,10 +301,13 @@ if (!ExportSessionCsv(recorder, out_dir, /*timing_with_phase=*/true)) {
     std::fprintf(stderr, "[FAIL] export csv to %s\n", out_dir);
     return 1;
 }
+ExportPicoCsv(pico_recorder, out_dir);
+WriteRunMeta(out_dir, ...);
+SavePeriodSummary / SavePeriodAbnormalCsv / ExportDiag* / ExportTeleopDiagReport;
 ```
 
-- **保存发生在循环结束之后**，不在 `catch` 里写盘，而是 `catch` 仅置 `loop_error`；`ExportSessionCsv` 在 teardown 之后**统一执行**。
-- Ctrl+C：`SIGINT` → `g_stop_requested` → 跳出 `while` → 同样走 teardown + ExportCsv。
+- **保存发生在循环结束之后**，不在 `catch` 里写盘，而是 `catch` 仅置 `loop_error`；导出在 teardown 之后**统一执行**。
+- Ctrl+C：`SIGINT` → `g_stop_requested` → 收尾（GoHome→下使能）→ 同样走落盘。
 - `recorder.Size()==0` 时 `ExportSessionCsv` 返回 `false`（与现实现一致）；异常过早退出时需打日志。
 
 #### 5.2.3 硬件 / 仿真模式（必选）
@@ -434,7 +456,7 @@ python -m python.teleop.pico_udp_publisher --port 30101
 
 ### PR-4：联调与文档
 
-- [ ] `data/test_rt_teleop/` 录制目录约定
+- [x] `data/test_rt_teleop/` 录制目录约定（§5.2.1；启动说明见仓库根 `PICO_TELEOP_STARTUP.md`）
 - [ ] 本文件补充实测参数与端口表
 
 ---

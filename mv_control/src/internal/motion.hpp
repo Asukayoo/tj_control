@@ -105,6 +105,7 @@ public:
     void RePlan(const Pose& target_pose, const RobotState& ref_rs, const V7d& ref_q);
     void RunPlan(RobotState& ref_rs);
     void Reset();
+    bool IsInitialized() const { return init_; }
     void SetLimit(const CartLimit& limit);
     void SetPdGain(double p_gain, double d_gain);
 private:
@@ -135,6 +136,7 @@ public:
     void RePlan(const Pose& pico_pose, const RobotState& ref_rs, const V7d& ref_q);
     void RunPlan(RobotState& ref_rs);
     void ResetSession();
+    bool IsSessionActive() const { return session_active_; }
     void SetLimit(const CartLimit& limit);
     void SetPdGain(double p_gain, double d_gain);
 private:

@@ -1,5 +1,6 @@
 #include "hw_interface.hpp"
 
+#include "common.hpp"
 #include "internal/diag.hpp"
 
 #include "FxRtCSDef.h"
@@ -8,16 +9,26 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <thread>
 
 namespace {
 
-constexpr int kFramePollTries = 5;
-constexpr int kSdkSendSleepMs = 10;
-constexpr int kOpenClearRetries = 10;
-
 void SleepMs(int ms) {
     std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+}
+
+// Init 专用：阻塞等到 OnClearSet 成功（发送槽空闲）
+bool WaitOnClearSet(int retries, int sleep_ms) {
+    for (int i = 0; i < retries; ++i) {
+        if (OnClearSet()) {
+            return true;
+        }
+        if (sleep_ms > 0) {
+            SleepMs(sleep_ms);
+        }
+    }
+    return false;
 }
 
 void ClampVelAcc(int& vel, int& acc) {
@@ -71,11 +82,58 @@ bool SendClearErrorBatch(int arm) {
     return OnSetSend();
 }
 
+// Init 专用：设置 PD 速度前馈周期（阻塞等发送槽 + WaitResponse）
+bool SendVelEstStepBatch(int step_ms) {
+    if (step_ms < 1) {
+        return true;
+    }
+    for (int attempt = 0; attempt < kVelEstSlotRetries; ++attempt) {
+        if (!WaitOnClearSet(1, 0)) {
+            SleepMs(kVelEstSlotSleepMs);
+            continue;
+        }
+        const bool ok_a = FX_OnSetVelEstStep('A', step_ms);
+        const bool ok_b = FX_OnSetVelEstStep('B', step_ms);
+        if (!ok_a || !ok_b) {
+            std::fprintf(stderr,
+                         "[WARN] FX_OnSetVelEstStep(%d ms) API rejected (A=%d B=%d)\n",
+                         step_ms, static_cast<int>(ok_a), static_cast<int>(ok_b));
+            return false;
+        }
+        // Init 可阻塞：等控制器应答，避免仅 OnSetSend 后槽仍忙
+        if (OnSetSendWaitResponse(kVelEstSendWaitMs) >= 0) {
+            return true;
+        }
+        SleepMs(kVelEstSlotSleepMs);
+    }
+    std::fprintf(stderr,
+                 "[WARN] FX_OnSetVelEstStep(%d ms) send-slot busy or no response "
+                 "after %d retries\n",
+                 step_ms, kVelEstSlotRetries);
+    return false;
+}
+
 bool CurrentModeMatches(const DCSS& dcss, int arm, int cur_state, int imp_type) {
     if (dcss.m_State[arm].m_CurState != cur_state) {
         return false;
     }
     if (cur_state == ARM_STATE_TORQ && dcss.m_In[arm].m_ImpType != imp_type) {
+        return false;
+    }
+    return true;
+}
+
+bool ControllerSdkVersionMatches() {
+    char ver_name[30] = {};
+    std::snprintf(ver_name, sizeof(ver_name), "VERSION");
+    long ctrl_ver = 0;
+    const long sdk_ver = OnGetSDKVersion();
+    if (OnGetIntPara(ver_name, &ctrl_ver) != 0 ||
+        (ctrl_ver / 1000) != (sdk_ver / 1000)) {
+        std::fprintf(stderr,
+                     "[FAIL] Init: SDK/controller version mismatch "
+                     "(controller=%ld sdk=%ld)\n",
+                     ctrl_ver, sdk_ver);
         return false;
     }
     return true;
@@ -145,6 +203,10 @@ public:
         if (!OnLinkTo(cfg.ip[0], cfg.ip[1], cfg.ip[2], cfg.ip[3])) {
             return false;
         }
+        if (!ControllerSdkVersionMatches()) {
+            OnRelease();
+            return false;
+        }
         for (int arm = 0; arm < 2; ++arm) {
             bool cleared = false;
             for (int i = 0; i < kOpenClearRetries; ++i) {
@@ -152,7 +214,7 @@ public:
                     cleared = true;
                     break;
                 }
-                SleepMs(1);
+                SleepMs(kInitPollSleepMs);
             }
             if (!cleared) {
                 return false;
@@ -160,18 +222,27 @@ public:
         }
         DCSS dcss{};
         int frame_update = 0;
-        for (int i = 0; i < kFramePollTries; ++i) {
+        for (int i = 0; i < kSdkFramePollTries; ++i) {
             if (!OnGetBuf(&dcss)) {
-                SleepMs(1);
+                SleepMs(kInitPollSleepMs);
                 continue;
             }
             if (dcss.m_Out[0].m_OutFrameSerial != 0 &&
                 dcss.m_Out[0].m_OutFrameSerial != frame_update) {
                 ApplyLogSwitch(cfg.log_switch);
-                SleepMs(kSdkSendSleepMs);
+                if (kEnableVelEstStep) {
+                    // OnLogOff 内部 OnSetSend 后槽可能仍忙；Init 允许短等再发
+                    SleepMs(kSdkSendSleepMs);
+                    if (!SendVelEstStepBatch(kVelEstStepMs)) {
+                        std::fprintf(stderr,
+                                     "[WARN] FX_OnSetVelEstStep(%d ms) failed; "
+                                     "velocity feedforward disabled\n",
+                                     kVelEstStepMs);
+                    }
+                }
                 return true;
             }
-            SleepMs(1);
+            SleepMs(kInitPollSleepMs);
         }
         return false;
     }

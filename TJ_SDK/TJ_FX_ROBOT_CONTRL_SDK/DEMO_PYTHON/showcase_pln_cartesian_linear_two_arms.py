@@ -67,6 +67,7 @@ else:
 robot.log_switch('1')
 robot.local_log_switch('1')
 
+
 robot.clear_set()
 robot.set_vel_acc(arm='A', velRatio=100, AccRatio=100)
 robot.set_vel_acc(arm='B', velRatio=100, AccRatio=100)
@@ -76,10 +77,10 @@ logger.info(f'set A&B arm vel&acc, 100ms timeout: {timeout} ms')
 robot.clear_set()
 robot.set_state(arm='A', state=1)
 robot.set_state(arm='B', state=1)
-timeout = robot.send_cmd_wait_response(100)
-logger.info(f'set A&B arm position mode, 100ms timeout: {timeout} ms')
+timeout = robot.send_cmd_wait_response(1000)
+logger.info(f'set A&B arm position mode, 1000ms timeout: {timeout} ms')
+time.sleep(1)
 
-time.sleep(0.2)
 sub_data = robot.subscribe(dcss)
 logger.info('-----------\nA arm:')
 logger.info(f'current state{sub_data["states"][0]["cur_state"]}')
@@ -109,6 +110,16 @@ kk2 = Marvin_Kine()
 
 kk1.log_switch(0)
 kk2.log_switch(0)
+
+'''
+配置导入
+!!! 非常重要！！！
+使用前，请一定确认机型，导入正确的配置文件config_path，文件导错，计算会错误啊啊啊,甚至看起来运行正常，但是值错误！！！
+    ccs 6公斤的机型的有两个版本: 3.1(计算配置文件为ccs_m6_31.MvKDCfg), 4.0(计算配置文件为ccs_m6_40.MvKDCfg)，两个版本的参数不一样请确认版本后选择参数.
+    ccs 3公斤的机型的计算配置文件为ccs_m3.MvKDCfg；
+    srs机型为srs.MvKDCfg. 多个*.MvKDCfg会解析出错
+一定要确认arm_type是左臂0 还是右臂1
+'''
 
 ini_result1 = kk1.load_config(arm_type=0, config_path=os.path.join(parent_dir,'CommonConfig/ccs_m6_40.MvKDCfg'))
 ini_result2 = kk2.load_config(arm_type=1, config_path=os.path.join(parent_dir,'CommonConfig/ccs_m6_40.MvKDCfg'))

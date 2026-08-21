@@ -547,7 +547,7 @@ class Marvin_Kine:
             return False
 
     def ik(self, structure_data):
-        '''末端位置和姿态逆解到关节值
+        '''末端位置和姿态逆解到关节值，通过结构体数据判断逆解情况：是否成功； 失败原因等。
         :param 结构体数据
             输入参数：
                 m_Input_IK_TargetTCP：末端位置姿态4x4列表，可通过正解接口获取或者指定末端的位置和旋转
@@ -630,6 +630,19 @@ class Marvin_Kine:
 
     def ik_nsp(self, sturcture_data):
         '''逆解优化：可调整方向,不能单独使用，ik得到的逆运动学解的臂角不满足当前选解需求时使用。
+            结构体可真实反馈逆解情况
+    
+        输入数据里必须检查：
+            1）m_Input_IK_TargetTCP 是否超过机器人可达，
+            2）m_Input_IK_RefJoint ， 非零位的TCP的参考关节角度不能全为0
+            3）如果需要使用零空间臂角优化，m_Input_IK_ZSPType，m_Input_IK_ZSPPara，m_Input_ZSP_Angle需要设置
+    
+        如果逆解失败，可通过以下tag分析失败原因：
+            1）m_Output_IsOutRange 为 true, 输入的位置姿态矩阵机器人不可达。
+            2）m_Output_IsDeg 为 true, 关节间有奇异，调整参考角度
+            3）m_Output_IsJntExd 为 true, 有关节超出正负限位，细查看 m_Output_JntExdTags可知具体超限关节，再调整参考角度
+
+
             输入参数：
                 m_Input_IK_TargetTCP：末端位置姿态4x4列表，可通过正解接口获取或者指定末端的位置和旋转
                 m_Input_IK_RefJoint：参考输入角度，约束构想接近参考解读，防止解出来的构型跳变。该构型的肩、肘、腕组成初始臂角平面，以肩到腕方向为Z向量，参考角第四关节不能为零
@@ -835,8 +848,8 @@ class Marvin_Kine:
         :param start_xyzabc:起始点末端的位置和姿态：xyz平移单位：mm， abc旋转单位：度。
         :param end_xyzabc:结束点末端的位置和姿态：xyz平移单位：mm， abc旋转单位：度。
         :param ref_joints:参考关节构型，也是规划文件的起始点位。
-        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
-        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为1000 mm/s^2
+        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为500 mm/s
+        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为500 mm/s^2
         :param freq_hz:设置内部规划频率(注意：基频设置为1000Hz，下发点位频率若不是基频的整数分频，则默认频率为500Hz)
         :param save_path:保存的规划文件的路径
         :return: bool
@@ -875,8 +888,8 @@ class Marvin_Kine:
         :param start_xyzabc:起始点末端的位置和姿态：xyz平移单位：mm， abc旋转单位：度。
         :param end_xyzabc:结束点末端的位置和姿态：xyz平移单位：mm， abc旋转单位：度。
         :param ref_joints:参考关节构型，也是规划文件的起始点位。
-        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
-        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为1000 mm/s^2
+        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为500 mm/s
+        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为500 mm/s^2
         :param freq_hz:设置内部规划频率(注意：基频设置为1000Hz，下发点位频率若不是基频的整数分频，则默认频率为500Hz)
         :return: 规划得到的点集列表
           特别提示:1 需要读函数返回值,如果关节超限,返回为false,并且不会保存规划的PVT文件.
@@ -930,8 +943,8 @@ class Marvin_Kine:
 
         :param start_joints:起始点各个关节位置（单位：角度）
         :param end_joints:终点各个关节位置（单位：角度）
-        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
-        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为1000 mm/s^2
+        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为500 mm/s
+        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为500 mm/s^2
         :param freq_hz:设置内部规划频率(注意：基频设置为1000Hz，下发点位频率若不是基频的整数分频，则默认频率为500Hz)
         :param save_path:规划文件的保存路径
         :return: bool
@@ -976,8 +989,8 @@ class Marvin_Kine:
 
                :param start_joints:起始点各个关节位置（单位：角度）
                :param end_joints:终点各个关节位置（单位：角度）
-               :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
-               :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为10000 mm/s^2
+               :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为500 mm/s
+               :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为500 mm/s^2
                :param freq_hz:设置内部规划频率(注意：基频设置为1000Hz，下发点位频率若不是基频的整数分频，则默认频率为500Hz)
                :return: 规划得到的点集列表
                特别提示:1 需要读函数返回值,如果关节超限,返回为false,并且不会保存规划的点集.
@@ -1031,8 +1044,8 @@ class Marvin_Kine:
         :param start_xyzabc: 起始点位姿 (X, Y, Z, A, B, C) 单位：mm 和 度
         :param end_xyzabc:   终点位姿 (X, Y, Z, A, B, C)
         :param ref_joints:   参考关节角 (7个关节，单位：度)
-        :param vel:          速度，单位 mm/s，范围 0.1~1000
-        :param acc:          加速度，单位 mm/s²，范围 0.1~10000
+        :param vel:          速度，单位 mm/s，范围 0.1~500
+        :param acc:          加速度，单位 mm/s²，范围 0.1~500
         :param freq_hz:      规划频率（基频1000Hz，下发频率可能被调整）
         :return: (点集列表, pset指针) 维度根据实际规划确定
         """
@@ -1087,8 +1100,8 @@ class Marvin_Kine:
         :param allow_range: 允许改变臂焦的范围
         :param zsp_type: 是否改变臂角度
         :param zsp_para: 臂角参数
-        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
-        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为10000 mm/s^2
+        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为500 mm/s
+        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为500 mm/s^2
         :param freq_hz:设置内部规划频率(注意：基频设置为1000Hz，下发点位频率若不是基频的整数分频，则默认频率为500Hz)
         :return: 成功返回True，失败返回False
         """
@@ -1133,8 +1146,8 @@ class Marvin_Kine:
         :param allow_range: 允许改变臂焦的范围
         :param zsp_type: 是否改变臂角度
         :param zsp_para: 臂角参数
-        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
-        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为10000 mm/s^2
+        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为500 mm/s
+        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为500 mm/s^2
         :return: 成功返回True，失败返回False
         """
         serial = ctypes.c_int32(self.robot_tag)

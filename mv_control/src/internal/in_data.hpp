@@ -4,12 +4,8 @@
 
 #include <array>
 
-// 控制周期 1kHz；Servo 插值见 common.hpp kStreamServoCycles（40 周期三次样条 + 10 点滑动平均）
+// 控制周期见 common.hpp；SDK 帧/超时常量见 common.hpp（kSdkFrame* / kTransition*）
 // SDK m_OutFrameSerial：Init 轮询次数 / Run 无刷新阈值
-constexpr int kSdkFramePollCycles = 5;
-constexpr int kSdkFrameStaleRunCycles = 20;
-// 使能/模式切换过渡超时：1kHz 下 1000 ts ≈ 1s
-constexpr int kTransitionTimeoutCycles = 1000;
 
 // SDK 原始状态，仅供 Detect / 清错 / 慢速轮询
 struct SdkErrorDetail {

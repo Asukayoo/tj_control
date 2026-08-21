@@ -1,4 +1,4 @@
-// test_enable：Init → 1kHz(使能→运行→下使能) → 内存记录 → 导出 CSV
+// test_enable：Init → 500Hz(使能→运行→下使能) → 内存记录 → 导出 CSV
 #include "mv_control.hpp"
 #include "run_session.hpp"
 #include "test_diag.hpp"
@@ -18,9 +18,9 @@ namespace {
 
 constexpr int kEnableAtCycle = 10;
 constexpr int kRunN = 10;
-constexpr int kCycleMax = 5000;
-constexpr int64_t kPeriodUsLo = 900;
-constexpr int64_t kPeriodUsHi = 1100;
+constexpr int kCycleMax = kControlHz * 5;
+constexpr int64_t kPeriodUsLo = kControlPeriodUsLo;
+constexpr int64_t kPeriodUsHi = kControlPeriodUsHi;
 
 }  // namespace
 
@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
 
     int go = -1;
     while (go != 0 && go != 1) {
-        std::printf("0=退出  1=进入1kHz循环: ");
+        std::printf("0=退出  1=进入500Hz循环: ");
         if (std::scanf("%d", &go) != 1) {
             return 1;
         }
@@ -72,7 +72,7 @@ int main(int argc, char** argv) {
     session.ReserveRecorder(kCycleMax);
     ctrl.ResetHwRunStats();
 
-    std::printf("\n======== 1kHz loop ========\n");
+    std::printf("\n======== 500Hz loop ========\n");
     while (true) {
         if (cycle == kEnableAtCycle) {
             std::cerr << ">>> enable cmd cycle " << cycle << std::endl;
@@ -146,7 +146,7 @@ int main(int argc, char** argv) {
     }
 
     std::printf("\n[PASS] cycles=%d  saved → %s\n", cycle, out_dir);
-    SavePeriodDiagFromRecorder(out_dir, session.Recorder(), 1000, kPeriodUsLo,
-                               kPeriodUsHi);
+    SavePeriodDiagFromRecorder(out_dir, session.Recorder(), kControlPeriodUs,
+                               kPeriodUsLo, kPeriodUsHi);
     return (left_step == 5 && right_step == 5) ? 0 : 3;
 }

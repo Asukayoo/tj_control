@@ -45,6 +45,7 @@ public:
     StatusCode GetStatusCode() const;
     ErrorCode GetErrorCode() const;
     ControlModeStatus GetControlModeStatus() const;
+    bool IsStationary() const;  // SDK m_LowSpdFlag
 
 private:
     struct Impl;

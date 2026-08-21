@@ -1,29 +1,35 @@
-pico_samples=11519
-valid_samples=10400 fresh_samples=10400
-first_valid_cycle=22380
+pico_samples=10893
+valid_samples=10377 fresh_samples=10377
+first_valid_cycle=5160
 nan_pose_samples=0
-trigger_ge_0.99_samples=6701
-right_x_span_m=0.832361
+trigger_ge_0.99_samples=7694
+right_x_span_m=6.251712
+pico_ts_delta_mean_ms=20.00 pico_ts_delta_max_ms=207.71
+pico_ts_spike_gt50ms=13 frozen_during_spike=0
+udp_seq_gap=264
 
 结论:
 - 位姿有变化且无数值异常：Pico 发布与 C++ 订阅正常；若仿真不动请查 servo_pico_trace。
+- UDP seq 缺口 264：查 500Hz poll 或发布进程调度。
+- Pico 设备 timestamp 尖峰(>50ms) 13 次，其中位姿冻结 0 次 → 优先查 PC Service/头显无线。
+- 可运行: python3 -m python.teleop.pico_latency_diag --sdk --seconds 15
 
 [servo_pico_trace]
-arm0 api_enter=1743 api_reject=0 stream_submit=1743
-arm0 motion_init=15 session_init=15 session_fk_fail=0 replan=1743
-arm0 run_session=34860 run_skip_session=0 servo_run=24858 servo_skip_init=10002
-arm0 ik_ok=24299 ik_fail=559
-arm1 api_enter=5475 api_reject=0 stream_submit=5475
-arm1 motion_init=36 session_init=36 session_fk_fail=0 replan=5475
-arm1 run_session=109500 run_skip_session=0 servo_run=75581 servo_skip_init=33919
-arm1 ik_ok=73722 ik_fail=1859
+arm0 api_enter=7695 api_reject=0 stream_submit=7695
+arm0 motion_init=4 session_init=4 session_fk_fail=0 replan=7695
+arm0 run_session=76950 run_skip_session=0 servo_run=76950 servo_skip_init=0
+arm0 ik_ok=76950 ik_fail=0
+arm1 api_enter=6281 api_reject=0 stream_submit=6281
+arm1 motion_init=2 session_init=2 session_fk_fail=0 replan=6281
+arm1 run_session=62810 run_skip_session=0 servo_run=62810 servo_skip_init=0
+arm1 ik_ok=62810 ik_fail=0
 
 [servo_pico_结论]
 arm0:
-  - 位姿已进入 ServoPByPico：api_enter=1743
-  - 规划成功：session_init=15 replan=1743
-  - IK 成功 24299 次，失败 559 次
+  - 位姿已进入 ServoPByPico：api_enter=7695
+  - 规划成功：session_init=4 replan=7695
+  - IK 成功 76950 次
 arm1:
-  - 位姿已进入 ServoPByPico：api_enter=5475
-  - 规划成功：session_init=36 replan=5475
-  - IK 成功 73722 次，失败 1859 次
+  - 位姿已进入 ServoPByPico：api_enter=6281
+  - 规划成功：session_init=2 replan=6281
+  - IK 成功 62810 次

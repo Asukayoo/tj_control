@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PyBullet 双臂 URDF 可视化：UDP 订阅 14 关节角 [rad]，1kHz 刷新。"""
+"""PyBullet 双臂 URDF 可视化：UDP 订阅 14 关节角 [rad]，500Hz 刷新。"""
 
 from __future__ import annotations
 
@@ -15,15 +15,15 @@ from pathlib import Path
 import pybullet as p
 import pybullet_data
 
-# 默认 URDF（与 config.yaml 一致）
-DEFAULT_URDF = (
-    "/home/yxc/tj_control/urdf/Marvin_M6S_CCS_696_ urdf/urdf/"
-    "Marvin M6-S-CCS-696-V4.0_Base_and_Stand_Asm urdf.urdf"
-)
+_ROOT = Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
+from python.robot_models import prompt_robot_model, resolve_model_urdf  # noqa: E402
 
 DOF = 14
-HZ = 1000
-DT = 1.0 / HZ  # 1 kHz = 1 ms
+HZ = 500
+DT = 1.0 / HZ  # 500 Hz = 2 ms
 UDP_FMT = "<14d"  # 小端 float64：左臂 7 + 右臂 7 [rad]
 UDP_PKT_SIZE = struct.calcsize(UDP_FMT)
 
@@ -34,15 +34,21 @@ JOINT_NAMES = [f"Joint{i}_L" for i in range(1, 8)] + [
 
 
 def prepare_urdf(urdf_path: Path) -> Path:
-    """将 package:// 网格路径替换为本地绝对路径，供 PyBullet 加载。"""
+    """将 mesh 路径替换为本地绝对路径，供 PyBullet 加载。"""
     mesh_dir = (urdf_path.parent.parent / "meshes").resolve()
     if not mesh_dir.is_dir():
         raise FileNotFoundError(f"mesh 目录不存在: {mesh_dir}")
 
+    mesh_prefix = str(mesh_dir).replace("\\", "/") + "/"
     text = urdf_path.read_text(encoding="utf-8")
     text = re.sub(
         r'package://[^"]+/meshes/',
-        str(mesh_dir).replace("\\", "/") + "/",
+        mesh_prefix,
+        text,
+    )
+    text = re.sub(
+        r'\.\./meshes/',
+        mesh_prefix,
         text,
     )
     tmp = tempfile.NamedTemporaryFile(
@@ -160,15 +166,35 @@ def run(urdf: Path, udp_port: int, gui: bool) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="PyBullet 双臂 URDF + UDP 关节可视化")
-    parser.add_argument("--urdf", type=Path, default=Path(DEFAULT_URDF))
+    parser.add_argument(
+        "--model",
+        choices=("615", "696"),
+        default=None,
+        help="已废弃：启动时强制交互选择；若传入仅打印 WARN",
+    )
+    parser.add_argument(
+        "--urdf",
+        type=Path,
+        default=None,
+        help="显式 URDF 路径（跳过交互选择，仅调试用）",
+    )
     parser.add_argument("--udp-port", type=int, default=30100, help="UDP 端口")
     parser.add_argument("--no-gui", action="store_true", help="无头模式 DIRECT")
     args = parser.parse_args()
 
-    if not args.urdf.is_file():
-        raise SystemExit(f"URDF 不存在: {args.urdf}")
+    if args.urdf is not None:
+        urdf = args.urdf
+        model_label = "custom"
+    else:
+        if args.model is not None:
+            print("[WARN] --model 已忽略，启动时将交互选择 URDF", flush=True)
+        model_label = prompt_robot_model()
+        urdf = resolve_model_urdf(model_label)
+    if not urdf.is_file():
+        raise SystemExit(f"URDF 不存在: {urdf}")
 
-    run(args.urdf, args.udp_port, gui=not args.no_gui)
+    print(f"型号: {model_label}\nurdf: {urdf}", flush=True)
+    run(urdf, args.udp_port, gui=not args.no_gui)
 
 
 if __name__ == "__main__":

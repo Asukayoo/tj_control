@@ -13,7 +13,8 @@ public:
     MVControl();
     ~MVControl();
     bool Init(const char* config_path = MV_CONTROL_CONFIG_DEFAULT, bool is_sim = false,
-              std::shared_ptr<HwInterface> hw = nullptr);
+              std::shared_ptr<HwInterface> hw = nullptr,
+              const char* urdf_override = nullptr);
     void Run();
     Robot& Left();
     Robot& Right();

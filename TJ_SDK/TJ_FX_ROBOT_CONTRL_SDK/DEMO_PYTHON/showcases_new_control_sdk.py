@@ -5,6 +5,7 @@ parent_dir = os.path.dirname(current_dir)
 sys.path.insert(0, parent_dir)
 current_file_path = os.path.abspath(__file__)
 current_path = os.path.dirname(current_file_path)
+DEFAULT_CONFIG_PATH = os.path.join(parent_dir, 'CommonConfig', 'ccs_m6_40.MvKDCfg')
 from SDK_PYTHON.fx_kine import Marvin_Kine, FX_InvKineSolvePara, convert_to_8x8_matrix
 from SDK_PYTHON.fx_robot import Concise_Marvin_Robot, DCSS
 import time
@@ -489,7 +490,7 @@ def case8_cart_drag_z_and_save_data(save_path='drag_z.txt'):
     robot.disable(arm=arm)
     robot.release_robot()
 
-def case9_run_pln_joint_space(config_path=config_path):
+def case9_run_pln_joint_space(config_path=DEFAULT_CONFIG_PATH):
     '''define parameters'''
     arm='A'
     pln_vel = 0.5
@@ -568,7 +569,7 @@ def case9_run_pln_joint_space(config_path=config_path):
     robot.disable(arm=arm)
     robot.release_robot()
 
-def case10_run_pln_cart_space(config_path=config_path):
+def case10_run_pln_cart_space(config_path=DEFAULT_CONFIG_PATH):
     '''define parameters'''
     arm='A'
     pln_vel = 0.5
@@ -588,6 +589,12 @@ def case10_run_pln_cart_space(config_path=config_path):
     if not robot.connect(robot_ip='192.168.1.190', log_switch=0):  # log ON
         logger.error("--- connect failed ---")
         return False
+    
+    re=robot.set_position_state(arm='A',velRatio=100,AccRatio=100)
+    if not re:
+        logger.error("--- switch to position failed ---")
+        return False
+    time.sleep(0.5) #reserve time for switch to position state
 
     ''' if robot not at start joints planing to start joints '''
     sub_data=robot.subscribe(dcss)
@@ -806,7 +813,18 @@ def case12_eef_communication():
     robot.release_robot()
 
 if __name__=="__main__":
-    config_path=os.path.join(parent_dir, 'CommonConfig/ccs_m6_40.MvKDCfg')
+
+    '''
+    配置导入
+    !!! 非常重要！！！
+    使用前，请一定确认机型，导入正确的配置文件config_path，文件导错，计算会错误啊啊啊,甚至看起来运行正常，但是值错误！！！
+        ccs 6公斤的机型的有两个版本: 3.1(计算配置文件为ccs_m6_31.MvKDCfg), 4.0(计算配置文件为ccs_m6_40.MvKDCfg)，两个版本的参数不一样请确认版本后选择参数.
+        ccs 3公斤的机型的计算配置文件为ccs_m3.MvKDCfg；
+        srs机型为srs.MvKDCfg. 多个*.MvKDCfg会解析出错
+    一定要确认arm_type是左臂0 还是右臂1
+    '''
+    DEFAULT_CONFIG_PATH = os.path.join(parent_dir, 'CommonConfig', 'ccs_m6_40.MvKDCfg')
+
     logger.info("----------------------------------------------------")
     logger.info("------------Concise SDK API showcases--------------")
     logger.info("Concise SDK APIe coexists compatibly with the old interface.\nPlease uncomment the showcases below one by one and compile and run them.")
@@ -859,12 +877,12 @@ if __name__=="__main__":
     '''showcase9: In joint space: Perform multiple loops, plan motion from the starting point to the end point, and interrupt the planned motion during the movement.'''
     # logger.info("--------------------------")
     # logger.info("showcase: In joint space: Perform multiple loops, plan motion from the starting point to the end point, and interrupt the planned motion during the movement.")
-    # case9_run_pln_joint_space(config_path=config_path)
+    # case9_run_pln_joint_space()
 
     '''showcase10: In cartesian space: planning rectangular movement from the starting point.'''
     # logger.info("--------------------------")
     # logger.info("showcase: In cartesian space: planning rectangular movement from the starting point.")
-    # case10_run_pln_cart_space(config_path=config_path)
+    # case10_run_pln_cart_space()
 
     '''showcase11: set End-effector tools info :kinematics and dynamics'''
     # logger.info("--------------------------")

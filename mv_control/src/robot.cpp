@@ -5,8 +5,10 @@
 #include "internal/sdk_map.hpp"
 #include "internal/ik.hpp"
 
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <fstream>
 
 namespace {
 
@@ -153,7 +155,24 @@ Robot::Impl::Impl(int arm_serial, const JointLimit& joint_lim,
       motion_movl_(cart_lim, arm_serial),
       motion_servoj_(joint_lim),
       motion_servop_(cart_lim, arm_serial),
-      motion_servop_pico_(cart_lim, arm_serial) {}
+      motion_servop_pico_(cart_lim, arm_serial) {
+    // #region agent log
+    {
+        std::ofstream out("/home/yxc/tj_control/.cursor/debug-c463d8.log", std::ios::app);
+        if (out) {
+            const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::system_clock::now().time_since_epoch())
+                                .count();
+            out << "{\"sessionId\":\"c463d8\",\"runId\":\"pre-fix\",\"hypothesisId\":\"B\","
+                   "\"location\":\"robot.cpp:Impl::Impl\",\"message\":\"impl_ctor_done\","
+                   "\"data\":{\"arm\":"
+                << arm_serial << ",\"sizeof_Impl\":" << sizeof(Impl)
+                << ",\"imp_K0\":" << imp_config_.joint.K(0)
+                << "},\"timestamp\":" << ms << "}\n";
+        }
+    }
+    // #endregion
+}
 
 Robot::Robot(int arm_serial)
     : impl_(std::make_unique<Impl>(
@@ -366,10 +385,6 @@ void Robot::_UpdateEnableState() {
 }
 
 bool Robot::_CallSdkControlMode(ControlMode mode) {
-    if (impl_->is_sim_) {
-        return true;
-    }
-
     StateCmdPackage cmd{};
     cmd.vel_percent = impl_->vel_ratio_;
     cmd.acc_percent = impl_->acc_ratio_;
@@ -471,6 +486,13 @@ void Robot::_SubmitStream(MotionType type, const CmdPackage& pkg) {
     impl_->stream_dirty_ = true;
 
     if (impl_->active_motion_ == type && impl_->motion_inited_) {
+        return;
+    }
+    if (impl_->active_motion_ == type && !impl_->motion_inited_) {
+        if (!impl_->active_cmd_.has_value()) {
+            impl_->active_cmd_.emplace();
+        }
+        impl_->active_cmd_->AssignFrom(pkg);
         return;
     }
     const bool can_start =
@@ -614,6 +636,7 @@ void Robot::_RunActiveMotion() {
     }
 
     if (!impl_->motion_inited_) {
+        bool motion_ready = true;
         switch (impl_->active_motion_) {
             case MotionType::Stop:
                 impl_->motion_stop_.InitPlan(impl_->ref_rs_);
@@ -634,6 +657,7 @@ void Robot::_RunActiveMotion() {
                 ++MvDiag::ServoPicoTraceGet().arm[impl_->arm_serial_].motion_init;
                 impl_->motion_servop_pico_.InitPlan(impl_->active_cmd_->pose, impl_->ref_rs_,
                                              impl_->ref_rs_.joint_state.q);
+                motion_ready = impl_->motion_servop_pico_.IsSessionActive();
                 break;
             case MotionType::MovJ:
                 impl_->motion_movj_.InitPlan(impl_->active_cmd_->q, impl_->ref_rs_);
@@ -647,7 +671,7 @@ void Robot::_RunActiveMotion() {
             default:
                 break;
         }
-        impl_->motion_inited_ = true;
+        impl_->motion_inited_ = motion_ready;
     }
 
     switch (impl_->active_motion_) {
@@ -954,6 +978,20 @@ bool Robot::ClearError() {
         return true;
     }
 
+    // 使能/模式过渡超时为软件侧判定，清错后允许重新下发 Disable/Enable
+    if (impl_->error_code_ == ErrorCode::EnableError ||
+        impl_->error_code_ == ErrorCode::ModeError) {
+        impl_->error_code_ = ErrorCode::Normal;
+        impl_->enable_transition_cycles_ = 0;
+        impl_->mode_transition_cycles_ = 0;
+        impl_->stop_pending_ = false;
+        if (impl_->active_motion_ == MotionType::Stop) {
+            impl_->active_motion_ = MotionType::None;
+            impl_->motion_inited_ = false;
+            impl_->active_cmd_.reset();
+        }
+    }
+
     if (impl_->is_sim_) {
         impl_->error_code_ = ErrorCode::Normal;
     } else if (IsHardwareRelatedError(impl_->error_code_) ||
@@ -967,6 +1005,8 @@ bool Robot::ClearError() {
             impl_->pending_state_queue_.front().type != StateCmdType::ClearError) {
             impl_->pending_state_queue_.push_front(cmd);
         }
+        _UpdateEnableState();
+        _UpdateStatus();
         return true;
     } else {
         impl_->error_code_ = ErrorCode::Normal;
@@ -980,6 +1020,8 @@ bool Robot::ClearError() {
 StatusCode Robot::GetStatusCode() const { return impl_->status_code_; }
 
 ErrorCode Robot::GetErrorCode() const { return impl_->error_code_; }
+
+bool Robot::IsStationary() const { return impl_->low_spd_flag_ == 1; }
 
 bool Robot::_SetRespState(const RobotState& rs) {
     impl_->resp_rs_.joint_state = rs.joint_state;

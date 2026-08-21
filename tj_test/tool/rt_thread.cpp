@@ -15,20 +15,6 @@ namespace {
 
 bool g_rt_applied = false;
 
-int ResolveCpu(int cpu) {
-    if (cpu == kRtCpuOff) {
-        return -1;
-    }
-    const int ncpu = static_cast<int>(sysconf(_SC_NPROCESSORS_ONLN));
-    if (ncpu <= 0) {
-        return 0;
-    }
-    if (cpu == kRtCpuAutoLast) {
-        return ncpu - 1;
-    }
-    return cpu;
-}
-
 void AbortRtSetup(const char* reason) {
     std::fprintf(stderr, "[rt] FATAL: %s\n", reason);
     std::fprintf(stderr,
@@ -40,6 +26,29 @@ void AbortRtSetup(const char* reason) {
 }
 
 }  // namespace
+
+int ResolveRtCpu(int cpu_hint) {
+    if (const char* env = std::getenv("TJ_RT_CPU")) {
+        const int from_env = std::atoi(env);
+        if (from_env >= 0) {
+            return from_env;
+        }
+    }
+    if (cpu_hint == kRtCpuOff) {
+        return -1;
+    }
+    const int ncpu = static_cast<int>(sysconf(_SC_NPROCESSORS_ONLN));
+    if (ncpu <= 0) {
+        return 0;
+    }
+    if (cpu_hint == kRtCpuAutoIsolated) {
+        return ncpu >= 4 ? ncpu - 2 : ncpu - 1;
+    }
+    if (cpu_hint == kRtCpuAutoLast) {
+        return ncpu - 1;
+    }
+    return cpu_hint;
+}
 
 RtThreadStatus ApplyRtThreadOptions(const RtThreadOptions& opt) {
     RtThreadStatus status{};
@@ -55,7 +64,7 @@ RtThreadStatus ApplyRtThreadOptions(const RtThreadOptions& opt) {
                      std::strerror(errno));
     }
 
-    const int target_cpu = ResolveCpu(opt.cpu);
+    const int target_cpu = ResolveRtCpu(opt.cpu);
     const bool want_affinity = target_cpu >= 0;
     if (want_affinity) {
         const int ncpu = static_cast<int>(sysconf(_SC_NPROCESSORS_ONLN));

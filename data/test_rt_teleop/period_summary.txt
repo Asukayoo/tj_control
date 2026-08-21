@@ -1,4 +1,5 @@
-raw_period_us: min=see_abnormal max=see_abnormal p50=999 p99=1211 mean=999.5  in[900,1100]=97.4%  (n=230365, target=1000)
-steady_period_us: p50=999 p99=1219 mean=1005.9  in[900,1100]=98.1%  (n=228628, catch_up<500us=1737)
-note: catch_up 为工作超时后 TIMER_ABSTIME 连跳产生的短 period，不代表真实高于 1kHz；稳态 jitter 看 steady 行。
-overrun_us: mean=21.2 max=4024  (work>1ms 会触发 catch_up)
+raw_period_us: min=see_abnormal max=see_abnormal p50=2000 p99=2013 mean=2000.0  in[1800,2200]=100.0%  (n=108924, target=2000)
+steady_period_us: p50=2000 p99=2013 mean=2000.0  in[1800,2200]=100.0%  (n=108923, catch_up<1000us=1)
+note: catch_up 为工作超时后 TIMER_ABSTIME 连跳产生的短 period，不代表真实高于 500Hz；稳态 jitter 看 steady 行。
+overrun_us: mean=9.6 max=120  (work>周期会触发 catch_up)
+note: period 越界行 attr_src=prev（拖长 period 的是上一拍 work）；work_over 为 curr；sched_gap 表示 prev.work 正常但 wake_late/period 很大（调度间隙）。

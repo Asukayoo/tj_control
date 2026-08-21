@@ -17,7 +17,7 @@ import logging
     查验连接是否成功,失败程序直接退出
     开启日志以便检查
     为了防止伺服有错，先清错
-    设置扭矩模式,关节阻抗模式,速度加速度百分比
+    设置扭矩模式,笛卡尔阻抗模式,速度加速度百分比
     设置阻抗参数
     订阅数据查看是否设置
     切换为末端笛卡尔阻抗
@@ -46,7 +46,12 @@ def auto_eefCart(robot,dcss,calculate_cfg_path:str,which_arm:str):
     from SDK_PYTHON.fx_kine import Marvin_Kine
     kk = Marvin_Kine()
     kk.log_switch(0)  # 0 off, 1 on
-    ini_result = kk.load_config(arm_type=idx, config_path=os.path.join(current_path, calculate_cfg_path))
+    config_path = calculate_cfg_path
+    if not os.path.isabs(config_path):
+        local_cfg = os.path.join(current_path, calculate_cfg_path)
+        common_cfg = os.path.join(parent_dir, 'CommonConfig', calculate_cfg_path)
+        config_path = local_cfg if os.path.exists(local_cfg) else common_cfg
+    ini_result = kk.load_config(arm_type=idx, config_path=config_path)
     initial_kine_tag = kk.initial_kine(
         robot_type=ini_result['TYPE'][idx],
         dh=ini_result['DH'][idx],
@@ -106,21 +111,21 @@ if __name__=="__main__":
     robot.local_log_switch('1') # 主要日志开："1", 关："0"
 
 
-    '''阻抗参数'''
+    '''设置阻抗模式下的参数'''
     robot.clear_set()
-    robot.set_cart_kd_params(arm='A', K=[10, 5000, 5000,600, 600, 600, 20], D=[0.1, 0.1, 0.1, 0.3, 0.3, 0.3, 1],
+    robot.set_cart_kd_params(arm='A',K=[3000,3000,3000,100,100,100,20], D=[0.2,0.2,0.2,0.2,0.2,0.2,0.2],
                              type=2)  # 预设参考。
-    robot.send_cmd()
-    time.sleep(0.5)
-
-
-    '''设置扭矩模式,关节阻抗模式,速度加速度百分比'''
-    robot.clear_set()
-    robot.set_state(arm='A',state=3)#state=3扭矩模式
-    robot.set_impedance_type(arm='A',type=2) #type = 1 关节阻抗;type = 2 坐标阻抗;type = 3 力控
     robot.set_vel_acc(arm='A',velRatio=50, AccRatio=50)
     robot.send_cmd()
     time.sleep(0.5)
+
+
+    '''设置扭矩模式,笛卡尔阻抗模式'''
+    robot.clear_set()
+    robot.set_state(arm='A',state=3)#state=3扭矩模式
+    robot.set_impedance_type(arm='A',type=2) #type = 1 关节阻抗;type = 2 坐标阻抗;type = 3 力控
+    robot.send_cmd()
+    time.sleep(1)
 
 
     '''订阅数据查看是否设置'''
@@ -152,6 +157,16 @@ if __name__=="__main__":
     time.sleep(0.002)
     logger.info(f'cur jv:{sub_data["outputs"][0]["fb_joint_pos"]}')
     '''末端笛卡尔阻抗'''
+
+    '''
+    配置导入
+    !!! 非常重要！！！
+    使用前，请一定确认机型，导入正确的配置文件config_path，文件导错，计算会错误啊啊啊,甚至看起来运行正常，但是值错误！！！
+        ccs 6公斤的机型的有两个版本: 3.1(计算配置文件为ccs_m6_31.MvKDCfg), 4.0(计算配置文件为ccs_m6_40.MvKDCfg)，两个版本的参数不一样请确认版本后选择参数.
+        ccs 3公斤的机型的计算配置文件为ccs_m3.MvKDCfg；
+        srs机型为srs.MvKDCfg. 多个*.MvKDCfg会解析出错
+    一定要确认arm_type是左臂0 还是右臂1
+    '''
     auto_eefCart(robot,dcss,'ccs_m6_40.MvKDCfg','A')
 
     '''订阅数据查看是否到位'''

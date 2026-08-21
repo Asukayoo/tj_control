@@ -66,18 +66,36 @@ else:
 robot.log_switch('1') #全局日志开："1", 关："0"
 robot.local_log_switch('1') # 主要日志开："1", 关："0"
 
+
+'''设置扭矩模式参数： 阻抗参数，速度加速度百分比'''
+robot.clear_set()
+robot.set_vel_acc(arm='A',velRatio=10, AccRatio=10)
+robot.set_joint_kd_params(arm='A',K=[12, 12, 12, 10, 9, 9, 7], D=[0.3,0.3,0.3,0.2,0.2,0.2,0.2])
+robot.send_cmd()
+time.sleep(1)
+
+
+'''设置扭矩模式,关节阻抗模式'''
+robot.clear_set()
+robot.set_state(arm='A',state=3)#state=3扭矩模式
+robot.set_impedance_type(arm='A',type=1) #type = 1 关节阻抗;type = 2 坐标阻抗;type = 3 力控
+robot.send_cmd()
+time.sleep(1)
+
+
 '''设置扭矩模式 力控模式 '''
 robot.clear_set()
 robot.set_state(arm='A',state=3)#state=3扭矩模式
 robot.set_impedance_type(arm='A',type=3) #type = 1 关节阻抗;type = 2 坐标阻抗;type = 3 力控
 robot.send_cmd()
-time.sleep(0.5)
+time.sleep(1)
 
 '''设置力控参数'''
 robot.clear_set()
 # 设置是在Y轴方向有5厘米的调节范围
 robot.set_force_control_params(arm='A',fcType=0, fxDirection=[0, 1, 0, 0, 0, 0], fcCtrlpara=[0, 0, 0, 0, 0, 0, 0],
                                         fcAdjLmt=5.)
+robot.send_cmd()
 time.sleep(0.5)
 
 '''订阅数据查看是否设置'''
@@ -97,6 +115,7 @@ robot.clear_set()
 #根据前面设置的力控参数，这里力控的效果是：
 #在Y轴方向有个10N的力一直压着手臂,相对于基座,末端往下压了5厘米的效果， 上下拖动手臂试试， 手臂像弹簧一样会回到原来的位置。力控阻抗下更柔顺
 robot.set_force_cmd(arm='A',f=10)
+robot.send_cmd()
 time.sleep(0.5)
 
 '''订阅数据查看力控指令是否设置成功'''

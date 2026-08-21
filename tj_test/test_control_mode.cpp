@@ -21,10 +21,10 @@
 namespace {
 
 constexpr int kStartAtCycle = 10;
-constexpr int kWaitAfterEnable = 1000;
-constexpr int kCycleMax = 300000;
-constexpr int64_t kPeriodUsLo = 900;
-constexpr int64_t kPeriodUsHi = 1100;
+constexpr int kWaitAfterEnable = kControlCyclesPerSecond;
+constexpr int kCycleMax = kControlMaxCycles5Min;
+constexpr int64_t kPeriodUsLo = kControlPeriodUsLo;
+constexpr int64_t kPeriodUsHi = kControlPeriodUsHi;
 
 constexpr double kLeftTargetDeg[DOF] = {50.120,  -40.842, -143.263, -100.953,
                                         17.520,  -42.639, -42.742};
@@ -293,7 +293,7 @@ int main(int argc, char** argv) {
 
     int go = -1;
     while (go != 0 && go != 1) {
-        std::printf("0=退出  1=进入1kHz循环: ");
+        std::printf("0=退出  1=进入500Hz循环: ");
         if (std::scanf("%d", &go) != 1) {
             return 1;
         }
@@ -320,7 +320,7 @@ int main(int argc, char** argv) {
     session.ReserveRecorder(kCycleMax);
     ctrl.ResetHwRunStats();
 
-    std::printf("\n======== 1kHz 控制模式测试 ========\n");
+    std::printf("\n======== 500Hz 控制模式测试 ========\n");
     std::printf("左目标[deg]: %.3f %.3f %.3f %.3f %.3f %.3f %.3f\n",
                 kLeftTargetDeg[0], kLeftTargetDeg[1], kLeftTargetDeg[2],
                 kLeftTargetDeg[3], kLeftTargetDeg[4], kLeftTargetDeg[5],
@@ -388,7 +388,7 @@ int main(int argc, char** argv) {
         std::printf("\n[%s] cycles=%d  saved → %s\n", pass ? "PASS" : "FAIL", cycle,
                     out_dir);
     }
-    SavePeriodDiagFromRecorder(out_dir, session.Recorder(), 1000, kPeriodUsLo,
-                               kPeriodUsHi);
+    SavePeriodDiagFromRecorder(out_dir, session.Recorder(), kControlPeriodUs,
+                               kPeriodUsLo, kPeriodUsHi);
     return (pass || interrupted) ? 0 : 3;
 }

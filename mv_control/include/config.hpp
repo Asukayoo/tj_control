@@ -10,6 +10,7 @@
 #endif
 
 struct ArmConfig {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     int arm_serial = 0;
     V7d home_q = V7d::Zero();
     V7d work_q = V7d::Zero();
@@ -32,35 +33,43 @@ struct ConnectConfig {
     int log_switch = 0;
     int vel_ratio = 10;
     int acc_ratio = 10;
-    int mode_transition_timeout_ms = 1000;
+    int mode_transition_timeout_ms = kTransitionTimeoutCycles;
     bool strict_init_state = true;
-    int servo_err_poll_cycles = 1000;  // 1kHz 下默认约 1Hz；0=Run 内不轮询
+    int servo_err_poll_cycles = kServoErrPollCyclesDefault;  // 默认约 1Hz；0=Run 内不轮询
 };
 
 struct ImpJointConfig {
-    V7d K = (V7d() << 100, 100, 100, 100, 50, 50, 50).finished();
-    V7d D = V7d::Constant(0.5);
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    // DEMO: showcase_offline_movl_keepj_execution.cpp（关节阻抗预设）
+    V7d K = (V7d() << 2, 2, 2, 1.6, 1, 1, 1).finished();
+    V7d D = V7d::Constant(0.4);
 };
 
 struct ImpCartConfig {
-    V7d K = (V7d() << 500, 500, 500, 50, 50, 50, 20).finished();
-    V7d D = V7d::Constant(0.5);
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+    // DEMO: showcase_offline_movl_execution.cpp
+    // K[0..2] 平移 N/m；K[3..5] 旋转 N·m/rad；K[6] 零空间；D 阻尼比
+    V7d K = (V7d() << 8000, 8000, 8000, 600, 600, 600, 20).finished();
+    V7d D = (V7d() << 0.8, 0.8, 0.8, 0.4, 0.4, 0.4, 1).finished();
     int rot_type = 2;
     std::array<double, 7> cart_ctrl_para{};
 };
 
 struct ImpForceConfig {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     V6d fx_dir = (V6d() << 0, 0, 1, 0, 0, 0).finished();
     double fc_adj_lmt = 10.0;
 };
 
 struct ImpConfig {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     ImpJointConfig joint{};
     ImpCartConfig cart{};
     ImpForceConfig force{};
 };
 
 struct MvConfig {
+    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
     ConnectConfig connect{};
     std::string urdf_path;
     ServoConfig servo{};
@@ -70,3 +79,7 @@ struct MvConfig {
 };
 
 bool LoadMvConfig(const char* yaml_path, MvConfig& out);
+
+// model: "615" 或 "696"；由 config_path 推导仓库根目录（启动交互选择时调用）
+bool ResolveRobotModelUrdf(const char* config_path, const char* model,
+                           std::string& out);

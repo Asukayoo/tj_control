@@ -7,6 +7,10 @@
 build/
 cmake-build-*/
 
+# --- 本地解压的 ROS 运行时依赖（如 libkdl_parser.so；正式安装用 apt/dpkg）---
+.deps/
+TJ_SDK/TJ_FX_ROBOT_CONTRL_SDK/contrlSDK100343/libkdl_parser.so
+
 # --- mv_control 本地配置（勿提交内网 IP / 工位参数覆盖）---
 mv_control/config/*.local.yaml
 mv_control/config/*.local.yml

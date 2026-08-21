@@ -1,4 +1,5 @@
 #include "Robot.h"
+#include <chrono>
 
 static CRobot *m_InsRobot = NULL;
 
@@ -196,8 +197,7 @@ bool CRobot::OnSetChDataB(unsigned char *data_ptr, long size_int, long set_ch)
 
 long CRobot::OnGetSDKVersion()
 {
-	if (m_InsRobot->m_LocalLogTag == true)
-		printf("[Marvin SDK]: SDK version %d\n", SDK_VERSION);
+	printf("[Marvin SDK]: SDK version %d\n", SDK_VERSION);
 	return SDK_VERSION;
 }
 
@@ -376,7 +376,7 @@ CRobot::CRobot()
 		}
 	}
 	printf("  /var/tmp/ directory permissions:\n");
-	system("ls -ld /var/tmp/");
+	(void)system("ls -ld /var/tmp/");
 #endif
 	(void)m_ShMem.OnMapMster(&m_ShMem, shm_name, 102400);
 	m_psm = m_ShMem.OnGetMem(&m_ShMem);
@@ -389,7 +389,7 @@ CRobot::CRobot()
 #else
 		char cmd[256];
 		snprintf(cmd, sizeof(cmd), "ls -la %s 2>/dev/null || echo '  File not found'", shm_name);
-		system(cmd);
+		(void)system(cmd);
 		int fd = open(shm_name, O_RDWR);
 		if (fd != -1)
 		{
@@ -423,7 +423,7 @@ CRobot::CRobot()
 			printf("  Checking file existence:\n");
 			char cmd[256];
 			snprintf(cmd, sizeof(cmd), "ls -la %s 2>/dev/null || echo '  File not found'", shm_name);
-			system(cmd);
+			(void)system(cmd);
 #endif
 		}
 		else
@@ -1046,6 +1046,8 @@ void CRobot::DoCnt()
 			m_respones_time_tag = 1;
 			m_last_response_timeout_cnt = 0;
 			m_send_response_timeout_cnt = 0;
+
+			m_send_response_cv.notify_one();
 		}
 	}
 }
@@ -3078,10 +3080,11 @@ long CRobot::OnSetSendWaitResponse(long time_out)
 	m_InsRobot->m_respones_time_tag = 0;
 	m_InsRobot->m_send_response_timeout_cnt = tmp_time_out;
 	m_InsRobot->m_SendTag = 100;
-	while (m_InsRobot->m_send_response_timeout_cnt > 0)
-	{
-		SLEEP(1);
-	}
+
+	std::unique_lock<std::mutex> lock(m_InsRobot->m_send_response_mutex);
+	m_InsRobot->m_send_response_cv.wait_for(lock, std::chrono::milliseconds(tmp_time_out), [&]
+											{ return m_InsRobot->m_send_response_timeout_cnt == 0; });
+
 	if (m_InsRobot->m_respones_time_tag == 1)
 	{
 		m_InsRobot->m_respones_time_tag = 0;

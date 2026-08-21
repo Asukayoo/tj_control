@@ -3,7 +3,7 @@
 # cart_state / MovL / ServoP：Link_Base 系（KDL FK/IK 直接输出）
 # 关节限制：max_v/max_a/max_j 单位 deg/s、deg/s²、deg/s³（内部转为 rad）
 # 笛卡尔限制：线速度 mm/s；角速度 deg/s、deg/s²、deg/s³（内部转为 rad）
-# Servo：内部 40 周期三次样条 + 10 点滑动平均；外部调用频率由应用层决定（如 test_servo 50Hz）
+# Servo：内部 kStreamServoCycles 周期三次样条（固定 40ms）；外部调用频率由应用层决定（如 test_servo 50Hz）
 
 servo:
   servoj:
@@ -19,13 +19,14 @@ connect:
   log_switch: 0
   vel_ratio: 100
   acc_ratio: 100
-  mode_transition_timeout_ms: 1000   # 1kHz 下 1000 ts；SDK 101~109 或模式不同步超时 → ModeError
+  # mode_transition_timeout_ms: 省略则 = kTransitionTimeoutCycles（1s 墙钟）
   strict_init_state: true
   servo_err_poll_cycles: 0      # Run 内不轮询；伺服故障靠 OnGetBuf 的 m_ERRCode==2
 
 # 阻抗/力控（须先下使能 SetControlMode，再 SetEnable 上使能进入该模式）
-# 关节 K/D 参考 DEMO_C++/showcase_offline_movl_keepj_execution.cpp
-# 笛卡尔 K/D 参考 DEMO_C++/showcase_offline_movl_execution.cpp
+# 默认值 = SDK DEMO 预设（与 yaml 缺省时 config.hpp 一致）
+# 关节: showcase_offline_movl_keepj_execution.cpp
+# 笛卡尔/零空间: showcase_offline_movl_execution.cpp（K[6]/D[6] 为零空间）
 imp:
   joint:
     # K[7] 关节刚度 N·m/rad（SDK 建议 ≤2）；D[7] 阻尼比 0~1
@@ -41,7 +42,10 @@ imp:
     fc_adj_lmt: 10.0
 
 # URDF 模型文件（基座 Link_Base，末端 TCP_Link_L / TCP_Link_R）
-# 相对本文件路径，或填写绝对路径
+# 相对本文件路径，或填写绝对路径。
+# test_rt_teleop / 可视化启动时会强制交互选择 615 或 696，覆盖此处路径：
+#   696: urdf/Marvin_M6S_CCS_696_ urdf/urdf/Marvin M6-S-CCS-696-V4.0_Base_and_Stand_Asm urdf.urdf
+#   615: urdf/Marvin_M3S_CCS_615_urdf/urdf/Marvin_M3-S-CCS-615-V2.0_Base_and_Stand_Asm.urdf
 sdk:
   urdf: "/home/yxc/tj_control/urdf/Marvin_M6S_CCS_696_ urdf/urdf/Marvin M6-S-CCS-696-V4.0_Base_and_Stand_Asm urdf.urdf"
 

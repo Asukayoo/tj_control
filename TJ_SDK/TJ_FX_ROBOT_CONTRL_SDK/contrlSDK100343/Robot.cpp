@@ -170,8 +170,7 @@ bool CRobot::OnSetChDataB(unsigned char *data_ptr, long size_int, long set_ch)
 
 long CRobot::OnGetSDKVersion()
 {
-	if (m_InsRobot->m_LocalLogTag == true)
-		printf("[Marvin SDK]: SDK version %d\n", SDK_VERSION);
+	printf("[Marvin SDK]: SDK version %d\n", SDK_VERSION);
 	return SDK_VERSION;
 }
 
@@ -563,26 +562,33 @@ bool CRobot::OnLinkTo(FX_UCHAR ip1, FX_UCHAR ip2, FX_UCHAR ip3, FX_UCHAR ip4)
 	memset(name, 0, 30);
 	sprintf(name, "VERSION");
 	long ctrlSysVers = 0;
-	long int cnt = 5;
-	while (cnt > 0)
+
+	for (long ii=0;ii<5;ii++)
 	{
-		if (0 != OnGetIntPara(name, &ctrlSysVers))
-		{
-			cnt--;
-			continue;
-		}
-		else
-		{
-			break;
-		}
+		OnGetIntPara(name, &ctrlSysVers);
+		printf("system version:%ld\n",ctrlSysVers);
+		SLEEP(10);
 	}
+	// long int cnt = 5;
+	// while (cnt > 0)
+	// {
+	// 	if (0 != OnGetIntPara(name, &ctrlSysVers))
+	// 	{
+	// 		cnt--;
+	// 		continue;
+	// 	}
+	// 	else
+	// 	{
+	// 		break;
+	// 	}
+	// }
 	m_InsRobot->m_ctrlSysVersion = ctrlSysVers;
-	int SDKVer = SDK_VERSION;
+	long SDKVer = SDK_VERSION;
 	if ((ctrlSysVers / 1000) != (SDKVer / 1000))
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
 		{
-			printf("[Marvin SDK %s]: Warning: Version mismatch between control system %d and SDK %d\n"
+			printf("[Marvin SDK %s]: Warning: Version mismatch between control system %ld and SDK %ld\n"
 				   "                      Some functions may not work properly\n",
 				   __FUNCTION__, m_InsRobot->m_ctrlSysVersion, SDK_VERSION);
 		}
@@ -1369,6 +1375,8 @@ void CRobot::DoCnt()
 			m_respones_time_tag = 1;
 			m_last_response_timeout_cnt = 0;
 			m_send_response_timeout_cnt = 0;
+
+			m_send_response_cv.notify_one();
 		}
 	}
 }
@@ -1482,8 +1490,8 @@ void CRobot::DoSend()
 	m_send_lock = true;
 	if (m_SendTag == 100)
 	{
-
-		sendto(_tosock_, (char *)m_SendBuf, m_Slen, 0, (struct sockaddr *)&_to, sizeof(_to));
+		memcpy(m_SendBuf_, m_SendBuf, 1500);
+		sendto(_tosock_, (char *)m_SendBuf_, m_Slen, 0, (struct sockaddr *)&_to, sizeof(_to));
 		m_SendTag = 0;
 		m_Slen = 0;
 	}
@@ -1762,6 +1770,10 @@ bool CRobot::OnClearSet()
 
 bool CRobot::OnSetJointLmt_A(int velRatio, int AccRatio)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	int data[10] = {0};
 	int v = velRatio;
 	int a = AccRatio;
@@ -1786,6 +1798,10 @@ bool CRobot::OnSetJointLmt_A(int velRatio, int AccRatio)
 
 bool CRobot::OnSetPVT_A(int id)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -1816,6 +1832,10 @@ bool CRobot::OnSetPVT_A(int id)
 
 bool CRobot::OnSetPVT_B(int id)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -1845,6 +1865,10 @@ bool CRobot::OnSetPVT_B(int id)
 
 bool CRobot::OnSetUserSpcfData_A(long data_category)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -1864,6 +1888,10 @@ bool CRobot::OnSetUserSpcfData_A(long data_category)
 
 bool CRobot::OnSetUserSpcfData_B(long data_category)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -1883,6 +1911,10 @@ bool CRobot::OnSetUserSpcfData_B(long data_category)
 
 bool CRobot::OnSetUserSpcfData(long data_category)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -1902,6 +1934,10 @@ bool CRobot::OnSetUserSpcfData(long data_category)
 
 bool CRobot::OnSetForceCmd_A(double force)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -1918,6 +1954,10 @@ bool CRobot::OnSetForceCmd_A(double force)
 
 bool CRobot::OnSetJointCmdPos_A(double joint[7])
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -1948,6 +1988,10 @@ bool CRobot::OnSetJointCmdPos_A(double joint[7])
 
 bool CRobot::OnInitPlnLmt(char *path)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2060,6 +2104,10 @@ bool CRobot::OnInitPlnLmt(char *path)
 
 bool CRobot::OnSetPlnCart_A(CPointSet *pset)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2162,6 +2210,10 @@ bool CRobot::OnSetPlnCart_A(CPointSet *pset)
 
 bool CRobot::OnSetPlnJoint_A(double start_joints[7], double stop_joints[7], double vel_ratio, double acc_ratio)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2279,6 +2331,10 @@ bool CRobot::OnSetPlnJoint_A(double start_joints[7], double stop_joints[7], doub
 
 bool CRobot::OnSetTrajInit_A(int pointNum)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2307,6 +2363,10 @@ bool CRobot::OnSetTrajInit_A(int pointNum)
 
 bool CRobot::OnSetTrajRun_A()
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2322,6 +2382,10 @@ bool CRobot::OnSetTrajRun_A()
 
 bool CRobot::OnStopPlnJoint_A()
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2349,20 +2413,29 @@ bool CRobot::OnStopPlnJoint_A()
 
 bool CRobot::OnStopPlnJoint_interA()
 {
-	long add_size = 1 + sizeof(FX_FLOAT) * 1;
-	if (add_size + m_InsRobot->m_Slen >= 1400)
+	if (m_InsRobot->m_SendTag != 0)
 	{
 		return false;
 	}
-	m_InsRobot->m_SendBuf[m_InsRobot->m_Slen] = 115;
-	m_InsRobot->m_Slen++;
-	FX_UCHAR *pnum = (FX_UCHAR *)&m_InsRobot->m_SendBuf[2];
-	(*pnum)++;
-	return true;
+	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
+	{
+		if (m_InsRobot->m_LocalLogTag == true)
+		{
+			printf("[Marvin SDK %s]: Warning: Version mismatch between control system %d and SDK %d\n", __FUNCTION__, m_InsRobot->m_ctrlSysVersion, SDK_VERSION);
+		}
+		return false;
+	}
+	int data[10] = {0};
+	long ret = OnWriteInt32(115, 0, data);
+	return (ret == 0);
 }
 
 bool CRobot::OnSetTrajSet_A(long serial, long pointNum, double *data)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (pointNum <= 0 || pointNum > 50)
 	{
 		return false;
@@ -2374,6 +2447,10 @@ bool CRobot::OnSetTrajSet_A(long serial, long pointNum, double *data)
 
 bool CRobot::OnSetForceCtrPara_A(int fcType, double fxDir[6], double fcCtrlPara[7], double fcAdjLmt)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2405,6 +2482,10 @@ bool CRobot::OnSetForceCtrPara_A(int fcType, double fxDir[6], double fcCtrlPara[
 
 bool CRobot::OnSetDragSpace_A(int zsType)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2422,6 +2503,10 @@ bool CRobot::OnSetDragSpace_A(int zsType)
 
 bool CRobot::OnSetCartKD_A(double K[7], double D[7], int type)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	double pv[20] = {0};
 	pv[0] = K[0];
 	pv[1] = K[1];
@@ -2448,6 +2533,10 @@ bool CRobot::OnSetCartKD_A(double K[7], double D[7], int type)
 bool CRobot::OnSetEefRot_A(int fcType, double CartCtrlPara[7])
 {
 
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	int pv1[20] = {0};
 	pv1[0] = fcType;
 	double pv[20] = {0};
@@ -2471,6 +2560,10 @@ bool CRobot::OnSetEefRot_A(int fcType, double CartCtrlPara[7])
 
 bool CRobot::OnSetJointKD_A(double K[7], double D[7])
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	double pv[20] = {0};
 	pv[0] = K[0];
 	pv[1] = K[1];
@@ -2493,6 +2586,11 @@ bool CRobot::OnSetJointKD_A(double K[7], double D[7])
 }
 bool CRobot::OnSetVelEstStep_A(long step)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
+
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2517,6 +2615,10 @@ bool CRobot::OnSetVelEstStep_A(long step)
 }
 bool CRobot::OnSetTool_A(double kinePara[6], double dynPara[10])
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	double pv[20] = {0};
 	pv[0] = kinePara[0];
 	pv[1] = kinePara[1];
@@ -2542,6 +2644,11 @@ bool CRobot::OnSetTool_A(double kinePara[6], double dynPara[10])
 
 bool CRobot::OnSetTargetState_A(int state)
 {
+
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2559,6 +2666,10 @@ bool CRobot::OnSetTargetState_A(int state)
 
 bool CRobot::OnSetImpType_A(int type)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2577,6 +2688,10 @@ bool CRobot::OnSetImpType_A(int type)
 /////////////////B//////////////////
 bool CRobot::OnSetJointLmt_B(int velRatio, int AccRatio)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	int data[10] = {0};
 	int v = velRatio;
 	int a = AccRatio;
@@ -2601,6 +2716,10 @@ bool CRobot::OnSetJointLmt_B(int velRatio, int AccRatio)
 
 bool CRobot::OnSetForceCmd_B(double force)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2617,6 +2736,10 @@ bool CRobot::OnSetForceCmd_B(double force)
 
 bool CRobot::OnSetJointCmdPos_B(double joint[7])
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		return false;
@@ -2641,6 +2764,10 @@ bool CRobot::OnSetJointCmdPos_B(double joint[7])
 
 bool CRobot::OnSetForceCtrPara_B(int fcType, double fxDir[6], double fcCtrlPara[7], double fcAdjLmt)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2672,6 +2799,10 @@ bool CRobot::OnSetForceCtrPara_B(int fcType, double fxDir[6], double fcCtrlPara[
 
 bool CRobot::OnSetDragSpace_B(int zsType)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2689,6 +2820,10 @@ bool CRobot::OnSetDragSpace_B(int zsType)
 
 bool CRobot::OnSetCartKD_B(double K[7], double D[7], int type)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	double pv[20] = {0};
 	pv[0] = K[0];
 	pv[1] = K[1];
@@ -2714,6 +2849,10 @@ bool CRobot::OnSetCartKD_B(double K[7], double D[7], int type)
 
 bool CRobot::OnSetEefRot_B(int fcType, double CartCtrlPara[7])
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	int pv1[20] = {0};
 	pv1[0] = fcType;
 	double pv[20] = {0};
@@ -2737,6 +2876,10 @@ bool CRobot::OnSetEefRot_B(int fcType, double CartCtrlPara[7])
 
 bool CRobot::OnSetJointKD_B(double K[7], double D[7])
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	double pv[20] = {0};
 	pv[0] = K[0];
 	pv[1] = K[1];
@@ -2760,6 +2903,10 @@ bool CRobot::OnSetJointKD_B(double K[7], double D[7])
 
 bool CRobot::OnSetVelEstStep_B(long step)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2784,6 +2931,10 @@ bool CRobot::OnSetVelEstStep_B(long step)
 }
 bool CRobot::OnSetTool_B(double kinePara[6], double dynPara[10])
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	double pv[20] = {0};
 	pv[0] = kinePara[0];
 	pv[1] = kinePara[1];
@@ -2809,6 +2960,10 @@ bool CRobot::OnSetTool_B(double kinePara[6], double dynPara[10])
 
 bool CRobot::OnSetTargetState_B(int state)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2826,6 +2981,10 @@ bool CRobot::OnSetTargetState_B(int state)
 
 bool CRobot::OnSetImpType_B(int type)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2843,6 +3002,10 @@ bool CRobot::OnSetImpType_B(int type)
 
 bool CRobot::OnSetPlnCart_B(CPointSet *pset)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -2944,6 +3107,10 @@ bool CRobot::OnSetPlnCart_B(CPointSet *pset)
 
 bool CRobot::OnSetPlnJoint_B(double start_joints[7], double stop_joints[7], double vel_ratio, double acc_ratio)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -3062,6 +3229,10 @@ bool CRobot::OnSetPlnJoint_B(double start_joints[7], double stop_joints[7], doub
 
 bool CRobot::OnSetPlnJoint_AB(double start_joints_A[7], double stop_joints_A[7], double start_joints_B[7], double stop_joints_B[7], double vel_ratio, double acc_ratio)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	DCSS t;
 	double vr = vel_ratio;
 	double ar = acc_ratio;
@@ -3219,20 +3390,23 @@ bool CRobot::OnSetPlnJoint_AB(double start_joints_A[7], double stop_joints_A[7],
 			return false;
 		}
 	}
-	SLEEP(20);
-	if (CRobot::OnGetBuf(&t) == true)
+
+	for (int i_=0;i_<5;i_++)
 	{
-		if (t.m_Out[0].m_TrajState != 2)
+		SLEEP(SLEEP_TIME);
+		CRobot::OnGetBuf(&t);
+		if (t.m_Out[0].m_TrajState == 2 || t.m_Out[1].m_TrajState == 2)
 		{
-			printf("[ERROR] OnSetPlnJoint_AB: The controller did not receive the sent trajectory of A\n");
-			return false;
-		}
-		if (t.m_Out[1].m_TrajState != 2)
-		{
-			printf("[ERROR] OnSetPlnJoint_AB: The controller did not receive the sent trajectory of B\n");
-			return false;
+			break;
 		}
 	}
+	CRobot::OnGetBuf(&t);
+	if (t.m_Out[0].m_TrajState != 2 || t.m_Out[1].m_TrajState != 2)
+	{
+		printf("[ERROR] OnSetPlnJoint_AB: controller did not receive trajectories.\n");
+		return false;
+	}
+	
 	CRobot::OnClearSet();
 	CRobot::OnSetTrajRun_A();
 	CRobot::OnSetTrajRun_B();
@@ -3246,6 +3420,10 @@ bool CRobot::OnSetPlnJoint_AB(double start_joints_A[7], double stop_joints_A[7],
 
 bool CRobot::OnSetTrajInit_B(int pointNum)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -3275,6 +3453,10 @@ bool CRobot::OnSetTrajInit_B(int pointNum)
 
 bool CRobot::OnSetTrajRun_B()
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -3290,6 +3472,10 @@ bool CRobot::OnSetTrajRun_B()
 
 bool CRobot::OnStopPlnJoint_B()
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -3317,6 +3503,10 @@ bool CRobot::OnStopPlnJoint_B()
 
 bool CRobot::OnStopPlnJoint_interB()
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (m_InsRobot->m_VersionMatchTag == FX_FALSE)
 	{
 		if (m_InsRobot->m_LocalLogTag == true)
@@ -3332,6 +3522,10 @@ bool CRobot::OnStopPlnJoint_interB()
 
 bool CRobot::OnSetTrajSet_B(long serial, long pointNum, double *data)
 {
+	if (m_InsRobot->m_SendTag != 0)
+	{
+		return false;
+	}
 	if (pointNum <= 0 || pointNum > 50)
 	{
 		return false;
@@ -3343,10 +3537,12 @@ bool CRobot::OnSetTrajSet_B(long serial, long pointNum, double *data)
 
 long CRobot::OnSetSendWaitResponse(long time_out)
 {
-	if (m_InsRobot->m_SendTag == 100)
+	if (m_InsRobot->m_SendTag == 100 || m_InsRobot->m_SendTag == 50 || m_InsRobot->m_SendTag == 70)
 	{
 		return -1;
 	}
+
+	m_InsRobot->m_SendTag = 70;
 	if (m_InsRobot->m_send_response_local_tag < 7)
 	{
 		m_InsRobot->m_send_response_local_tag = 7;
@@ -3381,10 +3577,10 @@ long CRobot::OnSetSendWaitResponse(long time_out)
 		return -1;
 	}
 
-	while (m_InsRobot->m_send_response_timeout_cnt > 0)
-	{
-		SLEEP(1);
-	}
+	std::unique_lock<std::mutex> lock(m_InsRobot->m_send_response_mutex);
+	m_InsRobot->m_send_response_cv.wait_for(lock, std::chrono::milliseconds(tmp_time_out), [&]
+											{ return m_InsRobot->m_send_response_timeout_cnt == 0; });
+
 	if (m_InsRobot->m_respones_time_tag == 1)
 	{
 		m_InsRobot->m_respones_time_tag = 0;

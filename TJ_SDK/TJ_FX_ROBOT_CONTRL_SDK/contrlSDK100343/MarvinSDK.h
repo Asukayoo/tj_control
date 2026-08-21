@@ -151,6 +151,7 @@ extern "C"
 	// 4.1 设置指定手臂的力控参数
 	// 设置fcType=0，基于基座的力控。
 	// 设置fcType=3，末端阻抗下力控，先使用OnSetEefRot_A/OnSetEefRot_B
+	// 设置fcType=4，进立场控制，设置后再调用FTArmControl接口
 	// 设置左臂力控参数
 	FX_DLL_EXPORT bool OnSetForceCtrPara_A(int fcType, double fxDir[6], double fcCtrlPara[7], double fcAdjLmt);
 	// 设置右臂力控参数
@@ -246,10 +247,27 @@ extern "C"
 	// FTCmds ：见下FxRtCSDef.h下FTCmd结构体
 	FX_DLL_EXPORT bool FTArmControl(char arm, FTCmd FTCmds);
 
-	//设置获取用户自定义数据接口
+	// 设置获取用户自定义数据接口
 	FX_DLL_EXPORT bool OnSetUserSpcfData_A(long data_category);
 	FX_DLL_EXPORT bool OnSetUserSpcfData_B(long data_category);
 	FX_DLL_EXPORT bool OnSetUserSpcfData(long data_category);
+
+	// 获取机器人名称
+	FX_DLL_EXPORT bool OnGetRobotName(char *robotName);
+
+	// 六维力传感器清零
+	// arm:"A" "B" ；
+	FX_DLL_EXPORT bool OnReset6DofForceSensor(char arm);
+
+	// 设置控制器系统时间
+	FX_DLL_EXPORT bool OnSetSystemTime(int year, int month, int day, int hour, int minute, int second);
+
+	// 软重启，仅控制板重启
+	FX_DLL_EXPORT bool OnSetReboot();
+
+	// 中止手臂运动，非急停，非idle
+	// arm: "A" "B" "AB" 三种字符是许可值
+	FX_DLL_EXPORT bool OnSetStopRunning(const char *arm);
 
 	/////////////////////////////////////简明式接口Concise SDK API//////////////////////////////////////////////
 	// 简明式接口，摒弃了老接口需要在OnClearSet() 和 OnSetSend()之间使用，且左右臂要的单独调取用，且需要查询伺服是否有错，清错后使用的逻辑。
@@ -286,6 +304,25 @@ extern "C"
 	//  ////////////////////////////////////////////////////////////////////////////////////////////////
 	//  //订阅数据接口,所有数据是结构体.
 	//  bool OnGetBuf(DCSS * ret);
+	// // 设置PD控制速度前馈 轨迹发送周期
+	// // arm:"A" "B" ； step： 轨迹发送周期（单位： ms ），小于1 则不添加速度前馈
+	// FX_DLL_EXPORT bool FX_OnSetVelEstStep(char arm, long step);
+	// // 设置指定手臂的扭矩控制指令
+	// // 机械臂末端以给定的力和扭矩运动到给定的位置距离和姿态距离。可实时触发调整力的方向和大小。
+	// // arm:"A" "B" ；
+	// // FTCmds ：见下FxRtCSDef.h下FTCmd结构体
+	// FX_DLL_EXPORT bool FTArmControl(char arm, FTCmd FTCmds);
+	// //设置获取用户自定义数据接口
+	// FX_DLL_EXPORT bool OnSetUserSpcfData_A(long data_category);
+	// FX_DLL_EXPORT bool OnSetUserSpcfData_B(long data_category);
+	// FX_DLL_EXPORT bool OnSetUserSpcfData(long data_category);
+	// // collaboration
+	// // 关节空间两个手臂同时规划运行，注意同时开始，不一定同时结束。
+	// FX_DLL_EXPORT bool CoRunPlnJoint(double start_joints_A[7], double stop_joints_A[7], double start_joints_B[7], double stop_joints_B[7], double vel_ratio, double acc_ratio);
+	// // 笛卡尔空间两个手臂从当前点规划方式运行到目标点，规划点位pset由KinematicsSDK计算接口计算得出。
+	// FX_DLL_EXPORT bool CoRunPlnCart(void *pset0, void *pset1);
+	// // 同时中断两个手臂的规划运行，笛卡尔空间和关节空间都适用
+	// FX_DLL_EXPORT bool CoStopPln();
 
 	// 连接机器人,log_switch（日志默认为关）： 0 关; 1 开。
 	FX_DLL_EXPORT bool Connect(unsigned char ip1, unsigned char ip2, unsigned char ip3, unsigned char ip4, int log_switch = 0);

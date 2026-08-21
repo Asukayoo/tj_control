@@ -183,7 +183,6 @@ int main()
     // 订阅查看设置是否成功
     OnGetBuf(&dcss);
     printf("current state of A arm:%d\n", dcss.m_State[0].m_CurState);
-    printf("cmd state of A arm:%d\n", dcss.m_State[0].m_CmdState);
     printf("error code of A arms:%d\n", dcss.m_State[0].m_ERRCode);
     printf("cmd of vel and acc:%d %d\n", dcss.m_In[0].m_Joint_Vel_Ratio, dcss.m_In[0].m_Joint_Acc_Ratio);
     printf("------------------------------\n");
@@ -202,6 +201,11 @@ int main()
     FX_DOUBLE MCP[2][7][3] = {0};
     FX_DOUBLE I[2][7][6] = {0};
 
+    // 配置导入 !!! 非常重要！！！ 使用前，请一定确认机型，导入正确的配置文件config_path，文件导错，看起来运行正常，但是值错误！！！
+    // 确认arm_type是左臂0 还是右臂1
+    // ccs 6公斤的机型的有两个版本: 3.1(计算配置文件为ccs_m6_31.MvKDCfg), 4.0(计算配置文件为ccs_m6_40.MvKDCfg)，两个版本的参数不一样请确认版本后选择参数.
+    // ccs 3公斤的机型的计算配置文件为ccs_m3.MvKDCfg；
+    // srs机型为srs.MvKDCfg.
     if (LOADMvCfg((char *)"ccs_m6_40.MvKDCfg", TYPE, GRV, DH, PNVA, BD, Mass, MCP, I) == FX_TRUE)
     {
         printf("Robot Load CFG Success\n");

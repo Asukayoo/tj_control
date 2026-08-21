@@ -1,15 +1,15 @@
-# 预编译 libMarvinSDK / libKine 由 tj_control 主仓库纳入版本管理，勿在此忽略 *.so *.dll
-
 .vs/
 .idea/
 .vscode/
 *.pyc
 __pycache__/
-kinematicsSDK/test.txt
-kinematicsSDK/testkj.txt
-test.txt
-testkj.txt
-DEMO_PYTHON/test.txt
-DEMO_PYTHON/testkj.txt
+PLN_MOVL_KEEPJ.txt
+PLN_MOVL.txt
+kinematicsSDK/*.txt
+DEMO_C++/*.txt
+DEMO_C++/*.csv
+DEMO_C++/*.exe
+DEMO_PYTHON/*.txt
+DEMO_PYTHON/*.csv
 debug/
 my_folder/

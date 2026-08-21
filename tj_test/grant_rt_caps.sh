@@ -23,7 +23,7 @@ resolve_build_dir() {
 
 BUILD_DIR="$(resolve_build_dir "$@")"
 
-for name in test_movj test_enable test_servo; do
+for name in test_movj test_enable test_servo test_rt_teleop; do
   bin="${BUILD_DIR}/tj_test/${name}"
   if [[ ! -f "${bin}" ]]; then
     echo "[grant_rt_caps] skip: ${bin} not found" >&2

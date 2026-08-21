@@ -29,7 +29,7 @@ struct Robot::Impl {
     int vel_ratio_ = 10;
     int acc_ratio_ = 10;
     bool strict_init_state_ = true;
-    int mode_transition_timeout_cycles_ = 1000;
+    int mode_transition_timeout_cycles_ = kTransitionTimeoutCycles;
     int enable_transition_cycles_ = 0;  // Enabling/Disabling 周期计数
     int mode_transition_cycles_ = 0;    // 控制模式切换周期计数
 

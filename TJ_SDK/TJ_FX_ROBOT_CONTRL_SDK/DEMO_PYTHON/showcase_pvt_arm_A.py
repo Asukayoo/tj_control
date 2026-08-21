@@ -68,7 +68,7 @@ else:
 robot.log_switch('1') #全局日志开："1", 关："0"
 robot.local_log_switch('1') # 主要日志开："1", 关："0"
 
-'''设置位置模式和速度'''
+'''设置PVT模式'''
 robot.clear_set()
 robot.set_state(arm='A',state=2)#PVT， 自己的速度和加速度，不受外部控制。
 robot.send_cmd()
@@ -81,7 +81,7 @@ logger.info(f'arm error code:{sub_data["states"][0]["err_code"]}')
 
 '''设置PVT 轨迹本机路径 和PVT号'''
 #linux
-pvt_file=current_path+'/LoadData_ccs_right/LoadData/IdenTraj/LoadIdenTraj_MarvinCCS_Left.fmv'
+pvt_file=os.path.join(parent_dir,"CommonConfig/LoadData_ccs/LoadData/IdenTraj/LoadIdenTraj_MarvinCCS_Left.fmv")
 robot.send_pvt_file('A',pvt_file, 2)
 time.sleep(1)
 

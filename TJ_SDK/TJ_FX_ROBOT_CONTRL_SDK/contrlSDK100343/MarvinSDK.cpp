@@ -16,7 +16,8 @@ void OnEMG_A()
 {
 	for (long i = 0; i < 3; i++)
 	{
-		CRobot::OnSetIntPara((char *)"EMCY0", 0);
+		if (CRobot::OnSetIntPara((char *)"EMCY0", 0) == 0)
+			break;
 		SLEEP(2);
 	}
 	CRobot::OnClearSet();
@@ -32,7 +33,8 @@ void OnEMG_B()
 {
 	for (long i = 0; i < 3; i++)
 	{
-		CRobot::OnSetIntPara((char *)"EMCY1", 0);
+		if (CRobot::OnSetIntPara((char *)"EMCY1", 0) == 0)
+			break;
 		SLEEP(2);
 	}
 	CRobot::OnClearSet();
@@ -48,8 +50,8 @@ void OnEMG_AB()
 {
 	for (long i = 0; i < 3; i++)
 	{
-		CRobot::OnSetIntPara((char *)"EMCY0", 0);
-		CRobot::OnSetIntPara((char *)"EMCY1", 0);
+		if (CRobot::OnSetIntPara((char *)"EMCY0", 0) == 0 && CRobot::OnSetIntPara((char *)"EMCY1", 0) == 0)
+			break;
 		SLEEP(2);
 	}
 	CRobot::OnClearSet();
@@ -70,7 +72,8 @@ void OnServoReset_A(int axis)
 	}
 	for (long i = 0; i < 3; i++)
 	{
-		CRobot::OnSetIntPara((char *)"RESETS0", axis);
+		if (CRobot::OnSetIntPara((char *)"RESETS0", axis) == 0)
+			break;
 		SLEEP(2);
 	}
 }
@@ -83,7 +86,8 @@ void OnServoReset_B(int axis)
 	}
 	for (long i = 0; i < 3; i++)
 	{
-		CRobot::OnSetIntPara((char *)"RESETS1", axis);
+		if (CRobot::OnSetIntPara((char *)"RESETS1", axis) == 0)
+			break;
 		SLEEP(2);
 	}
 }
@@ -126,7 +130,8 @@ void OnClearErr_A()
 	sprintf(name, "RESET0");
 	for (long i = 0; i < 3; i++)
 	{
-		CRobot::OnSetIntPara(name, 0);
+		if (CRobot::OnSetIntPara(name, 0) == 0)
+			break;
 		SLEEP(2);
 	}
 	if (local_log_tag == true)
@@ -140,9 +145,10 @@ void OnClearErr_B()
 	char name[30];
 	memset(name, 0, 30);
 	sprintf(name, "RESET1");
-	for (long i = 0; i < 10; i++)
+	for (long i = 0; i < 3; i++)
 	{
-		CRobot::OnSetIntPara(name, 0);
+		if (CRobot::OnSetIntPara(name, 0) == 0)
+			break;
 		SLEEP(2);
 	}
 	if (local_log_tag == true)
@@ -527,9 +533,9 @@ bool OnSetForceCtrPara_A(int fcType, double fxDir[6], double fcCtrlPara[7], doub
 			return false;
 		}
 	}
-	if (fcType != 0 && fcType != 3)
+	if (fcType != 0 && fcType != 3 && fcType != 4)
 	{
-		printf("[ERROR] OnSetForceCtrPara_A: Invalid fcType number %d (valid value: 0 or 3)\n", fcType);
+		printf("[ERROR] OnSetForceCtrPara_A: Invalid fcType number %d (valid value: 0,3,4)\n", fcType);
 		return false;
 	}
 	if (isnan(fcAdjLmt) || isinf(fcAdjLmt))
@@ -791,9 +797,9 @@ bool OnSetForceCtrPara_B(int fcType, double fxDir[6], double fcCtrlPara[7], doub
 			return false;
 		}
 	}
-	if (fcType != 0 && fcType != 3)
+	if (fcType != 0 && fcType != 3 && fcType != 4)
 	{
-		printf("[ERROR] OnSetForceCtrPara_B: Invalid fcType number %d (valid value: 0 or 3)\n", fcType);
+		printf("[ERROR] OnSetForceCtrPara_B: Invalid fcType number %d (valid value: 0,3,4)\n", fcType);
 		return false;
 	}
 	if (isnan(fcAdjLmt) || isinf(fcAdjLmt))
@@ -1042,11 +1048,9 @@ bool CoRunPlnCart(void *pset0, void *pset1)
 	long relic_num = num0 % 50;
 	long ii, jj, kk;
 	double SendData_A[350];
-	double SendData_B[350];
-	double *retp0, *retp1;
+	double *retp0;
 	long spos;
 	long ipos0 = 0;
-	long ipos1 = 0;
 	for (ii = 0; ii < send_g_num; ii++)
 	{
 		spos = 0;
@@ -1056,22 +1060,15 @@ bool CoRunPlnCart(void *pset0, void *pset1)
 			for (kk = 0; kk < 7; kk++)
 				SendData_A[spos++] = retp0[kk];
 		}
-		spos = 0;
-		for (jj = 0; jj < 50; jj++)
-		{
-			retp1 = static_cast<CPointSet *>(pset1)->OnGetPoint(ipos1++);
-			for (kk = 0; kk < 7; kk++)
-				SendData_B[spos++] = retp1[kk];
-		}
 
 		CRobot::OnClearSet();
 		CRobot::OnSetTrajSet_A(ii, 50, SendData_A);
 		if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
+		{
+			printf("[ERROR] OnSetTrajSet_A: timeout.\n");
 			return false;
-		CRobot::OnClearSet();
-		CRobot::OnSetTrajSet_B(ii, 50, SendData_B);
-		if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
-			return false;
+		}
+			
 	}
 	if (relic_num != 0)
 	{
@@ -1082,35 +1079,71 @@ bool CoRunPlnCart(void *pset0, void *pset1)
 			for (kk = 0; kk < 7; kk++)
 				SendData_A[spos++] = retp0[kk];
 		}
-		spos = 0;
-		for (jj = 0; jj < relic_num; jj++)
-		{
-			retp1 = static_cast<CPointSet *>(pset1)->OnGetPoint(ipos1++);
-			for (kk = 0; kk < 7; kk++)
-				SendData_B[spos++] = retp1[kk];
-		}
 		CRobot::OnClearSet();
 		CRobot::OnSetTrajSet_A(ii, relic_num, SendData_A);
 		if (CRobot::OnSetSendWaitResponse(5000) < 0)
 		{
-			printf("1\n");
-			return false;
-		}
-
-		CRobot::OnClearSet();
-		CRobot::OnSetTrajSet_B(ii, relic_num, SendData_B);
-		if (CRobot::OnSetSendWaitResponse(5000) < 0)
-		{
-			printf("11\n");
+			printf("[ERROR] OnSetTrajSet_A: timeout.\n");
 			return false;
 		}
 	}
-	SLEEP(10);
+
+	long send_g_num1 = num1 / 50;
+	long relic_num1 = num1 % 50;
+	long iii, jjj, kkk;
+	double SendData_B[350];
+	double *retp1;
+	long spos1;
+	long ipos1 = 0;
+	for (iii = 0; iii < send_g_num1; iii++)
+	{
+		spos1 = 0;
+		for (jjj = 0; jjj < 50; jjj++)
+		{
+			retp1 = static_cast<CPointSet *>(pset1)->OnGetPoint(ipos1++);
+			for (kkk = 0; kkk < 7; kkk++)
+				SendData_B[spos1++] = retp1[kkk];
+		}
+
+		CRobot::OnClearSet();
+		CRobot::OnSetTrajSet_B(iii, 50, SendData_B);
+		if (CRobot::OnSetSendWaitResponse(TIME_OUT) < 0)
+		{
+			printf("[ERROR] OnSetTrajSet_B: timeout.\n");
+			return false;
+		}
+	}
+	if (relic_num1 != 0)
+	{
+		spos1 = 0;
+		for (jjj = 0; jjj < relic_num1; jjj++)
+		{
+			retp1 = static_cast<CPointSet *>(pset1)->OnGetPoint(ipos1++);
+			for (kkk = 0; kkk < 7; kkk++)
+				SendData_B[spos1++] = retp1[kkk];
+		}
+		CRobot::OnClearSet();
+		CRobot::OnSetTrajSet_B(iii, relic_num1, SendData_B);
+		if (CRobot::OnSetSendWaitResponse(5000) < 0)
+		{
+			printf("[ERROR] OnSetTrajSet_B: timeout.\n");
+			return false;
+		}
+	}
+
+	for (int i=0;i<5;i++)
+	{
+		SLEEP(SLEEP_TIME);
+		CRobot::OnGetBuf(&t);
+		if (t.m_Out[0].m_TrajState == 2 || t.m_Out[1].m_TrajState == 2)
+		{
+			break;
+		}
+	}
 	CRobot::OnGetBuf(&t);
 	if (t.m_Out[0].m_TrajState != 2 || t.m_Out[1].m_TrajState != 2)
 	{
-
-		printf("3\n");
+		printf("[ERROR] controller did not receive trajectories.\n");
 		return false;
 	}
 
@@ -1535,7 +1568,8 @@ void ServoReset(char arm, int axis)
 	const char *cmd = (arm == 'A') ? "RESETS0" : "RESETS1";
 	for (int i = 0; i < 3; ++i)
 	{
-		CRobot::OnSetIntPara(const_cast<char *>(cmd), axis);
+		if (CRobot::OnSetIntPara(const_cast<char *>(cmd), axis) == 0)
+			break;
 		SLEEP(2);
 	}
 }
@@ -1659,8 +1693,8 @@ void ClearErr()
 	sprintf(name1, "RESET1");
 	for (long i = 0; i < 3; i++)
 	{
-		CRobot::OnSetIntPara(name, 0);
-		CRobot::OnSetIntPara(name1, 0);
+		if (CRobot::OnSetIntPara(name, 0) == 0 && CRobot::OnSetIntPara(name1, 0) == 0)
+			break;
 		SLEEP(2);
 	}
 	if (local_log_tag == true)
@@ -3462,6 +3496,7 @@ bool OnSetUserSpcfData_A(long data_category)
 	}
 	return true;
 }
+
 bool OnSetUserSpcfData_B(long data_category)
 {
 	CRobot::OnClearSet();
@@ -3473,6 +3508,7 @@ bool OnSetUserSpcfData_B(long data_category)
 	}
 	return true;
 }
+
 bool OnSetUserSpcfData(long data_category)
 {
 	CRobot::OnClearSet();
@@ -3619,4 +3655,301 @@ int CheckSDKTypeCompat(int *pByteOrder)
 
 	printf("[INFO] CheckSDKTypeCompat: all checks passed (type sizes, pack(4), byte order)\n");
 	return is_little ? 1 : 2;
+}
+
+bool OnGetRobotName(char *robotName)
+{
+	if (robotName == NULL)
+	{
+		printf("[Error]: OnGetRobotName: robotName is NULL\n");
+		return false;
+	}
+	char *local_path = (char *)"robot.ini";
+	char *remot_path = (char *)"/home/FUSION/Config/cfg/robot.ini";
+	if (!CRobot::OnRecvFile(local_path, remot_path))
+	{
+		return false;
+	}
+
+	FILE *file = fopen(local_path, "rb");
+	if (!file)
+	{
+		printf("[Error]: Cannot open file:%s\n", local_path);
+		if (remove(local_path) == 0)
+		{
+			printf("[Error]: delet file:%s\n", local_path);
+		}
+		return false;
+	}
+
+	if (local_log_tag == true)
+	{
+		printf("[Marvin SDK]: Recv file from host:%s\n", local_path);
+	}
+
+	const long CHUNK_SIZE = 4096;
+	char *chunk = (char *)malloc(CHUNK_SIZE);
+	char line[512];
+	int lineLen = 0;
+	bool found = false;
+
+	if (!chunk)
+	{
+		fclose(file);
+		printf("[Error]: malloc failed\n");
+		return false;
+	}
+
+	if (fseek(file, 0, SEEK_END) != 0)
+	{
+		free(chunk);
+		fclose(file);
+		printf("[Error]: fseek failed on %s\n", local_path);
+		return false;
+	}
+	long pos = ftell(file);
+
+	while (pos > 0 && !found)
+	{
+		long readSize = (pos >= CHUNK_SIZE) ? CHUNK_SIZE : pos;
+		pos -= readSize;
+		fseek(file, pos, SEEK_SET);
+		size_t got = fread(chunk, 1, readSize, file);
+
+		for (long i = (long)got - 1; i >= 0 && !found; i--)
+		{
+			char c = chunk[i];
+			if (c == '\n')
+			{
+				if (lineLen > 0)
+				{
+					for (int a = 0, b = lineLen - 1; a < b; a++, b--)
+					{
+						char t = line[a];
+						line[a] = line[b];
+						line[b] = t;
+					}
+					line[lineLen] = '\0';
+					if (strncmp(line, "Name=", 5) == 0)
+					{
+						strcpy(robotName, line + 5);
+						found = true;
+					}
+					lineLen = 0;
+				}
+			}
+			else if (c != '\r')
+			{
+				if (lineLen < (int)(sizeof(line) - 1))
+				{
+					line[lineLen++] = c;
+				}
+			}
+		}
+	}
+
+	if (!found && lineLen > 0)
+	{
+		for (int a = 0, b = lineLen - 1; a < b; a++, b--)
+		{
+			char t = line[a];
+			line[a] = line[b];
+			line[b] = t;
+		}
+		line[lineLen] = '\0';
+		if (strncmp(line, "Name=", 5) == 0)
+		{
+			strcpy(robotName, line + 5);
+			found = true;
+		}
+	}
+
+	free(chunk);
+	fclose(file);
+
+	if (!found)
+	{
+		printf("[Error]: can not find 'Name' in robot.ini\n");
+		if (remove(local_path) == 0)
+		{
+			printf("[Error]: delet file:%s\n", local_path);
+		}
+		return false;
+	}
+
+	if (local_log_tag == true)
+	{
+		printf("[Marvin SDK]: RobotName=%s\n", robotName);
+	}
+
+	if (remove(local_path) == 0)
+	{
+		if (local_log_tag == true)
+		{
+			printf("[Marvin SDK]: delet file:%s\n", local_path);
+		}
+	}
+	else
+	{
+		printf("[Error]: delete file failed or file does not exsist:%s\n", local_path);
+		return false;
+	}
+	return true;
+}
+
+bool OnReset6DofForceSensor(char arm)
+{
+	char name[30];
+	long vers = 0;
+	memset(name, 0, 30);
+	if (arm == 'A')
+	{
+		sprintf(name, "FTCL0");
+	}
+	else
+	{
+		sprintf(name, "FTCL1");
+	}
+	for (long i = 0; i < 3; i++)
+	{
+		if (CRobot::OnSetIntPara(name, 0) == 0)
+			break;
+		SLEEP(2);
+	}
+	if (local_log_tag == true)
+	{
+		printf("[Marvin SDK]: Six-axis force sensor of arm '%c' reset.\n", arm);
+	}
+	return true;
+}
+
+bool OnSetSystemTime(int year, int month, int day, int hour, int minute, int second)
+{
+	struct tm t;
+	t.tm_year = year - 1900;
+	t.tm_mon = month - 1;
+	t.tm_mday = day;
+	t.tm_hour = hour;
+	t.tm_min = minute;
+	t.tm_sec = second;
+	errno = 0;
+	mktime(&t);
+
+	if (t.tm_year != year - 1900 ||
+		t.tm_mon != month - 1 ||
+		t.tm_mday != day ||
+		t.tm_hour != hour ||
+		t.tm_min != minute ||
+		t.tm_sec != second)
+	{
+		return false;
+	}
+
+	char name[30];
+	char tmp[30];
+	long vers;
+	vers = 0;
+	memset(name, 0, 30);
+	strftime(tmp, 20, "%Y-%m-%d %H:%M:%S", &t);
+	snprintf(name, 30, "TM%s", tmp);
+	for (long i = 0; i < 3; i++)
+	{
+		CRobot::OnSetIntPara(name, vers);
+		SLEEP(2);
+	}
+	if (local_log_tag == true)
+	{
+		printf("[Marvin SDK]: set system time susccess\n");
+	}
+	return true;
+}
+
+bool OnSetReboot()
+{
+	if (SDK_VERSION < 100343009)
+	{
+		printf("[Error]: Reboot api only supported by SDK100343009+\n");
+		return false;
+	}
+	char name[30];
+	memset(name, 0, 30);
+	sprintf(name, "REBOOT");
+	CRobot::OnSetIntPara(name, 0);
+	printf("[Marvin SDK]: Reboot now\n");
+	return true;
+}
+
+bool OnSetStopRunning(const char *arm)
+{
+	if (arm == NULL)
+	{
+		printf("[ERROR] OnSetRunningStop: arm is NULL.\n");
+		return false;
+	}
+	size_t len = strlen(arm);
+	if (len == 0)
+	{
+		printf("[ERROR] OnSetRunningStop: arm is empty.\n");
+		return false;
+	}
+	if (len > 2)
+	{
+		printf("[ERROR] OnSetRunningStop: arm \"%s\" too long (max 2 chars).\n", arm);
+		return false;
+	}
+	if (strcmp(arm, "A") != 0 &&
+		strcmp(arm, "B") != 0 &&
+		strcmp(arm, "AB") != 0)
+	{
+		printf("[ERROR] OnSetRunningStop: invalid arm \"%s\". Must be exactly \"A\", \"B\", or \"AB\".\n", arm);
+		return false;
+	}
+	char paraName[30];
+	memset(paraName, 0, 30);
+	if (strcmp(arm, "A") == 0)
+	{
+		sprintf(paraName, "RSTA0");
+		for (long i = 0; i < 3; i++)
+		{
+			if (CRobot::OnSetIntPara(paraName, 0) == 0)
+				break;
+			SLEEP(2);
+		}
+		if (local_log_tag == true)
+		{
+			printf("[Marvin SDK]: stop running arm '%s'.\n", arm);
+		}
+		return true;
+	}
+	else if (strcmp(arm, "B") == 0)
+	{
+		sprintf(paraName, "RSTA1");
+		for (long i = 0; i < 3; i++)
+		{
+			if (CRobot::OnSetIntPara(paraName, 0) == 0)
+				break;
+			SLEEP(2);
+		}
+		if (local_log_tag == true)
+		{
+			printf("[Marvin SDK]: stop running arm '%s'.\n", arm);
+		}
+		return true;
+	}
+	else if (strcmp(arm, "AB") == 0)
+	{
+		sprintf(paraName, "RSTA01");
+		for (long i = 0; i < 3; i++)
+		{
+			if (CRobot::OnSetIntPara(paraName, 0) == 0)
+				break;
+			SLEEP(2);
+		}
+		if (local_log_tag == true)
+		{
+			printf("[Marvin SDK]: stop running arm '%s' reset.\n", arm);
+		}
+		return true;
+	}
+	return true;
 }

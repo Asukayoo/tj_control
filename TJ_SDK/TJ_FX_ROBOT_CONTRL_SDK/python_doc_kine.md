@@ -83,6 +83,18 @@
     使用前，请一定确认机型，导入正确的配置文件(*.MvKDCfg)，文件导错，计算会错误啊啊啊,甚至看起来运行正常，但是值错误！！！
 
 ### 逆解结构体参数介绍
+    结构体可真实反馈逆解情况
+    
+    输入数据里必须检查：
+        1）m_Input_IK_TargetTCP 是否超过机器人可达，
+        2）m_Input_IK_RefJoint ， 非零位的TCP的参考关节角度不能全为0
+        3）如果需要使用零空间臂角优化，m_Input_IK_ZSPType，m_Input_IK_ZSPPara，m_Input_ZSP_Angle需要设置
+    
+    如果逆解失败，可通过以下tag分析失败原因：
+        1）m_Output_IsOutRange 为 true, 输入的位置姿态矩阵机器人不可达。
+        2）m_Output_IsDeg 为 true, 关节间有奇异，调整参考角度
+        3）m_Output_IsJntExd 为 true, 有关节超出正负限位，细查看 m_Output_JntExdTags可知具体超限关节，再调整参考角度
+        
     class FX_InvKineSolvePara(ctypes.Structure):
         _fields_ = [
             # 输入部分
@@ -104,7 +116,7 @@
             ("m_Output_JntExdABS", FX_DOUBLE), #所有关节中超出限位的最大角度的绝对值，比如解出一组关节角度，7关节超限，的值为-95，已知软限位为-90度，m_Output_JntExdABS=5.
             ("m_Output_IsJntExd", FX_BOOL), #是否有关节超出位置正负限制（False：未超出；True：超出）
             ("m_Output_RunLmtP", Vect7), #各个关节运行的正限位, 可作为计算六七关节的干涉参考最大限制。
-            ("m_Output_RunLmtN", Vect7) #各个关节运行的负限位，可作为计算六七关节的干涉参考最大限制。                                                                                mm
+            ("m_Output_RunLmtN", Vect7) #各个关节运行的负限位，可作为计算六七关节的干涉参考最大限制。                                                                                
         ]
 
 ### （1）日志关闭
@@ -296,8 +308,8 @@ movL(start_xyzabc: list, end_xyzabc: list, ref_joints: list, vel: float, acc: fl
         :param start_xyzabc:起始点末端的位置和姿态：xyz平移单位：mm， abc旋转单位：度。
         :param end_xyzabc:结束点末端的位置和姿态：xyz平移单位：mm， abc旋转单位：度。
         :param ref_joints:参考关节构型，也是规划文件的起始点位。
-        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
-        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为1000 mm/s^2
+        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为500 mm/s
+        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为500 mm/s^2
         :param freq_hz:设置内部规划频率(注意：基频设置为1000Hz，下发点位频率若不是基频的整数分频，则默认频率为500Hz)            
         :param save_path:保存的规划文件的路径
         :return: bool
@@ -315,8 +327,8 @@ movL_KeepJ(start_joints:list, end_joints:list,vel:float,freq_hz:int,save_path)
         '''直线规划保持关节构型, 规划文件的点位频率50Hz，即每20ms执行一行
         :param start_joints:起始点各个关节位置（单位：角度）
         :param end_joints:终点各个关节位置（单位：角度）
-        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
-        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为1000 mm/s^2
+        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为500 mm/s
+        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为500 mm/s^2
         :param freq_hz:设置内部规划频率(注意：基频设置为1000Hz，下发点位频率若不是基频的整数分频，则默认频率为500Hz)
         :param save_path:规划文件的保存路径
         :return: bool
@@ -337,8 +349,8 @@ movLA(start_xyzabc: list, end_xyzabc: list, ref_joints: list, vel: float, acc: f
         :param start_xyzabc:起始点末端的位置和姿态：xyz平移单位：mm， abc旋转单位：度。
         :param end_xyzabc:结束点末端的位置和姿态：xyz平移单位：mm， abc旋转单位：度。
         :param ref_joints:参考关节构型，也是规划文件的起始点位。
-        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
-        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为1000 mm/s^2
+        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为500 mm/s
+        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为500 mm/s^2
         :param freq_hz:设置内部规划频率(注意：基频设置为1000Hz，下发点位频率若不是基频的整数分频，则默认频率为500Hz)
         :return: 规划得到的点集列表
         特别提示:1 需要读函数返回值,如果关节超限,返回为false.
@@ -356,8 +368,8 @@ movL_KeepJA(start_joints:list, end_joints:list,vel:float,freq_hz:int,save_path)
     
        :param start_joints:起始点各个关节位置（单位：角度）
        :param end_joints:终点各个关节位置（单位：角度）
-       :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
-       :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为1000 mm/s^2
+       :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为500 mm/s
+       :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为500 mm/s^2
        :param freq_hz:设置内部规划频率(注意：基频设置为1000Hz，下发点位频率若不是基频的整数分频，则默认频率为500Hz)
        :return: 规划得到的点集列表
        特别提示:1 需要读函数返回值,如果关节超限,返回为false,并且不会保存规划的点集.
@@ -427,8 +439,8 @@ multi_movL_set_start(self, ref_joints: List[float], start_xyzabc: List[float],
         :param allow_range: 允许改变臂焦的范围
         :param zsp_type: 是否改变臂角度
         :param zsp_para: 臂角参数
-        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
-        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为10000 mm/s^2
+        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为500 mm/s
+        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为5000 mm/s^2
         :param freq_hz:设置内部规划频率(注意：基频设置为1000Hz，下发点位频率若不是基频的整数分频，则默认频率为500Hz)
         :return: 成功返回True，失败返回False
         """
@@ -448,8 +460,8 @@ multi_movL_next_point(self,
         :param allow_range: 允许改变臂焦的范围
         :param zsp_type: 是否改变臂角度
         :param zsp_para: 臂角参数
-        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为1000 mm/s
-        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为10000 mm/s^2
+        :param vel:约束了输出的规划文件的速度。单位毫米/秒， 最小为0.1mm/s， 最大为500 mm/s
+        :param acc:约束了输出的规划文件的加速度。单位毫米/平方秒， 最小为0.1mm/s^2， 最大为500 mm/s^2
         :return: 成功返回True，失败返回False
         """
 
@@ -478,8 +490,8 @@ mov_target(self,
         :param start_xyzabc: 起始点位姿 (X, Y, Z, A, B, C) 单位：mm 和 度
         :param end_xyzabc:   终点位姿 (X, Y, Z, A, B, C)
         :param ref_joints:   参考关节角 (7个关节，单位：度)
-        :param vel:          速度，单位 mm/s，范围 0.1~1000
-        :param acc:          加速度，单位 mm/s²，范围 0.1~10000
+        :param vel:          速度，单位 mm/s，范围 0.1~500
+        :param acc:          加速度，单位 mm/s²，范围 0.1~500
         :param freq_hz:      规划频率（基频1000Hz，下发频率可能被调整）
         :return: (点集列表, pset指针) 维度根据实际规划确定
         """

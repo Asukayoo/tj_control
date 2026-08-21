@@ -844,6 +844,62 @@ double CAxisPln::OnGetPln(double *ret_v)
 	return m_s;
 }
 
+static bool OnMovCheckVA(CPointSet *pset, double cycle, double joint_acc_lmt[7], double joint_vel_lmt[7])
+{
+	if (pset == NULL || joint_vel_lmt == NULL || joint_acc_lmt == NULL)
+	{
+		printf("invalid VA limit\n");
+		return false;
+	}
+
+	long point_num = pset->OnGetPointNum();
+	if (point_num < 2 || cycle <= 0.000001)
+	{
+		printf("invalid path points num\n");
+		return false;
+	}
+
+	double inv_cycle = 1.0 / cycle;
+	double inv_cycle2 = inv_cycle * inv_cycle;
+	double prev_vel[7] = {0};
+
+	for (long i = 1; i < point_num; i++)
+	{
+		double *prev_point = pset->OnGetPoint(i - 1);
+		double *cur_point = pset->OnGetPoint(i);
+		if (prev_point == NULL || cur_point == NULL)
+		{
+			printf("path point is NULL\n");
+			return false;
+		}
+
+		for (long j = 0; j < 7; j++)
+		{
+			double delta = cur_point[j] - prev_point[j];
+			double cur_vel = FX_Fabs(delta) * inv_cycle;
+
+			if (joint_vel_lmt[j] > 0.000001 && cur_vel > joint_vel_lmt[j] + 0.000001)
+			{
+				printf("[Warning]Velocity exceed limit at point %ld joint %ld: cur_vel= %lf, limit= %lf\n", i+1, j+1, cur_vel, joint_vel_lmt[j]);
+				return false;
+			}
+
+			if (i >= 2 && joint_acc_lmt[j] > 0.000001)
+			{
+				double cur_acc = FX_Fabs(delta * inv_cycle2 - prev_vel[j] * inv_cycle);
+				if (cur_acc > joint_acc_lmt[j] + 0.000001)
+				{
+					printf("[Warning]Acceleration exceed limit at point %ld joint %ld: cur_acc= %lf, limit= %lf\n", i+1, j+1, cur_acc, joint_acc_lmt[j]);
+					return false;
+				}
+			}
+			prev_vel[j] = delta * inv_cycle;
+		}
+	}
+
+	return true;
+}
+
 bool CAxisPln::OnMovL(long RobotSerial, double ref_joints[7], double start_pos[6], double end_pos[6], double vel, double acc, double jerk, char *path)
 {
 	///////determine same points
@@ -1189,23 +1245,19 @@ bool CAxisPln::OnMovL(long RobotSerial, double ref_joints[7], double start_pos[6
 	///////determine same points
 	long i = 0;
 	long j = 0;
-	long same_tag[6] = {0};
-	for (i = 0; i < 6; i++)
-	{
-		if (fabs(end_pos[i] - start_pos[i]) < 0.01)
-		{
-			same_tag[i] = 1;
-		}
-	}
+	long dof = 0;
+
 	///////Check Max Axis
-	CPointSet ret[6];
-	long num[3] = {0}; // ret[0].OnGetPointNum();
+	CPointSet ret[4];
+	long num[4] = {0}; // ret[0].OnGetPointNum();
 	long max_num = 0;
 	long max_num_axis = 0;
+	double axis_len[4] = {0};
 
 	for (i = 0; i < 3; i++)
 	{
-		OnPln(start_pos[i], end_pos[i], vel, acc, jerk, &ret[i]);
+		axis_len[i] = FX_Sqrt((end_pos[i] - start_pos[i]) * (end_pos[i] - start_pos[i]));
+		OnPln(0, axis_len[i], vel, acc, jerk, &ret[i]);
 		num[i] = ret[i].OnGetPointNum();
 		if (num[i] > max_num)
 		{
@@ -1232,19 +1284,20 @@ bool CAxisPln::OnMovL(long RobotSerial, double ref_joints[7], double start_pos[6
 		Q_end[2] = -Q_end[2];
 		Q_end[3] = -Q_end[3];
 	}
-	double qangle = FX_ACOS(cosangle) * 2 * FXARM_R2D;
-
-	// Cut Quaterniongs PLN
-	if ((same_tag[3] + same_tag[4] + same_tag[5]) < 3)
+	if(FX_Fabs(cosangle) > 1.000)
 	{
-		OnPln(0, qangle, vel, acc, jerk, &ret[3]);
-		double qnum = ret[3].OnGetPointNum();
+		cosangle = FX_Fabs(cosangle)/cosangle;
+	}
 
-		if (qnum > max_num)
-		{
-			max_num = qnum;
-			max_num_axis = 3;
-		}
+	double qangle = acos(cosangle) * 2 * FXARM_R2D;
+	OnPln(0, qangle, vel*0.8, acc*0.8, jerk*0.8, &ret[3]);
+	num[3] = ret[3].OnGetPointNum();
+
+	if (num[3] > max_num)
+	{
+		max_num = num[3];
+		max_num_axis = 3;
+		axis_len[3] = qangle;
 	}
 
 	CPointSet out;
@@ -1254,167 +1307,35 @@ bool CAxisPln::OnMovL(long RobotSerial, double ref_joints[7], double start_pos[6
 	for (i = 0; i < max_num; i++)
 	{
 		double *p = ret[max_num_axis].OnGetPoint(i);
-		tmp[0] = end_pos[0];
-		tmp[1] = end_pos[1];
-		tmp[2] = end_pos[2];
-		tmp[max_num_axis] = p[0];
+		double ratio = p[0]/axis_len[max_num_axis];
 
-		if ((same_tag[3] + same_tag[4] + same_tag[5]) < 3)
+		for(j = 0;j < 3; j++)
 		{
-			double ratio = 0.0;
-			if (max_num_axis == 3)
-			{
-				ratio = p[0] / qangle;
-				FX_QuaternionSlerp(Q_start, Q_end, ratio, &tmp[3]);
-			}
-			else
-			{
-				ratio = i / (double)(max_num - 1);
-				FX_QuaternionSlerp(Q_start, Q_end, ratio, &tmp[3]);
-			}
+			tmp[j] = start_pos[j] * (1-ratio) + end_pos[j] * ratio;
 		}
-		else
-		{
-			tmp[3] = Q_start[0];
-			tmp[4] = Q_start[1];
-			tmp[5] = Q_start[2];
-			tmp[6] = Q_start[3];
-		}
+		FX_QuaternionSlerp(Q_start,Q_end,ratio,&tmp[3]);
 
 		out.OnSetPoint(tmp);
 	}
 
-	// set 4 same point
-	for (i = 0; i < 4; i++)
+	// set 3 same point
+	for (i = 0; i < 3; i++)
 	{
 		out.OnSetPoint(tmp);
 	}
-
-	long dof = 0;
-	bool end_tag = false;
-	for (dof = 0; dof < 3; dof++)
-	{
-		if (dof != max_num_axis)
-		{
-			if (same_tag[dof] == 0)
-			{
-				double step = (double)(num[dof] - 1) / (max_num + 1);
-				long serial = 0;
-				double tmpy = 0;
-				for (i = 0; i < num[dof] - 3; i += 2)
-				{
-					double *p1 = ret[dof].OnGetPoint(i);
-					double *p2 = ret[dof].OnGetPoint(i + 1);
-					double *p3 = ret[dof].OnGetPoint(i + 2);
-					double *p4 = ret[dof].OnGetPoint(i + 3);
-
-					double x[4] = {0};
-					double y[4] = {0};
-					double xpara[10] = {0};
-					double retpara[4] = {0};
-
-					x[0] = i;
-					x[1] = i + 1;
-					x[2] = i + 2;
-					x[3] = i + 3;
-
-					y[0] = p1[0];
-					y[1] = p2[0];
-					y[2] = p3[0];
-					y[3] = p4[0];
-
-					CO3Polynorm::CalXPara(x, xpara);
-					CO3Polynorm::CalPnPara(xpara, y, retpara);
-
-					if (i == 0)
-					{
-						// for (j = 0; j < 3; j++)
-						for (; tmpy < x[3]; tmpy = serial * step)
-						{
-							double sloy = CO3Polynorm::CalPnY(retpara, tmpy);
-							double *p = out.OnGetPoint(serial);
-
-							serial++;
-
-							if (p != NULL)
-							{
-								p[dof] = sloy;
-							}
-						}
-					}
-					else
-					{
-						long k = 0;
-						while (tmpy > x[0])
-						{
-							k++;
-							tmpy -= step;
-						}
-						k--;
-						tmpy += step;
-
-						while (tmpy < x[1])
-						{
-							double sloy = CO3Polynorm::CalPnY(retpara, tmpy);
-							double *p = out.OnGetPoint(serial - k);
-							if (p != NULL)
-							{
-								double r1 = j;
-								double r2 = 0.0;
-								r1 /= step;
-								r2 = 1 - r1;
-								sloy = sloy * r1 + p[dof] * r2;
-								p[dof] = sloy;
-							}
-
-							tmpy += step;
-							k--;
-						}
-
-						while (tmpy < x[3])
-						{
-							double sloy = CO3Polynorm::CalPnY(retpara, tmpy);
-							double *p = out.OnGetPoint(serial);
-
-							serial++;
-							tmpy += step;
-							if (sloy < x[3] && tmpy > x[3])
-							{
-								end_tag = true;
-							}
-
-							if (p != NULL)
-							{
-								p[dof] = sloy;
-							}
-						}
-
-						if (end_tag == true)
-						{
-							double *p = out.OnGetPoint(serial);
-							if (p != NULL)
-							{
-								p[dof] = end_pos[dof];
-							}
-						}
-					}
-				}
-			}
-			else
-			{
-				for (i = 0; i < max_num; i++)
-				{
-					double *p = out.OnGetPoint(i);
-					if (p != NULL)
-					{
-						p[dof] = start_pos[dof];
-					}
-				}
-			}
-		}
-	}
-
 	long final_num = out.OnGetPointNum();
+	if(final_num >= 5000)
+	{
+		printf("Generated more than 5,000 points. Please try reducing the planning distance or increasing VA.");
+		return false;
+	}
+
+	if(0)
+	{
+		char* path1 = (char*)"generate_xyzq.txt";
+		out.OnSave(path1);
+	}
+
 	////////////////////InvKine//////////////
 	FX_InvKineSolvePara sp;
 
@@ -1521,6 +1442,15 @@ bool CAxisPln::OnMovL(long RobotSerial, double ref_joints[7], double start_pos[6
 		}
 		// ret_pset->OnSetPoint(ret_joints);
 	}
+
+	if(0)
+	{
+		char* path2 = (char*)"output_joints.txt";
+		ret_pset->OnSave(path2);
+	}
+
+	// VA check
+	OnMovCheckVA(ret_pset, m_cycle, m_Joint_Acc_Lmt, m_Joint_Vel_Lmt);
 	return true;
 }
 
@@ -2061,6 +1991,11 @@ bool CAxisPln::OnMovL_KeepJ_CutA(long RobotSerial, double startjoints[7], double
 
 	FX_INT32L num = 0;
 	num = pset.OnGetPointNum();
+	if(num >= 5000)
+	{
+		printf("Generated more than 5,000 points. Please try reducing the planning distance or increasing VA.");
+		return false;
+	}
 	FX_InvKineSolvePara sp;
 	sp.m_DGR1 = 10;
 	sp.m_DGR2 = 10;
@@ -2151,6 +2086,9 @@ bool CAxisPln::OnMovL_KeepJ_CutA(long RobotSerial, double startjoints[7], double
 		ret_pset->OnSetPoint(&p[19]);
 	}
 
+	// VA check
+	OnMovCheckVA(ret_pset, m_cycle, m_Joint_Acc_Lmt, m_Joint_Vel_Lmt);
+
 	return true;
 }
 
@@ -2238,60 +2176,6 @@ static bool OnPointSetCopy(CPointSet *src, CPointSet *dst)
 	}
 
 	return point_num > 0;
-}
-
-static bool OnMovCheckVA(CPointSet *pset, double cycle, double joint_acc_lmt[7], double joint_vel_lmt[7])
-{
-	if (pset == NULL || joint_vel_lmt == NULL || joint_acc_lmt == NULL)
-	{
-		printf("invalid VA limit\n");
-		return false;
-	}
-
-	long point_num = pset->OnGetPointNum();
-	if (point_num < 2 || cycle <= 0.000001)
-	{
-		return false;
-	}
-
-	double inv_cycle = 1.0 / cycle;
-	double inv_cycle2 = inv_cycle * inv_cycle;
-	double prev_vel[7] = {0};
-
-	for (long i = 1; i < point_num; i++)
-	{
-		double *prev_point = pset->OnGetPoint(i - 1);
-		double *cur_point = pset->OnGetPoint(i);
-		if (prev_point == NULL || cur_point == NULL)
-		{
-			return false;
-		}
-
-		for (long j = 0; j < 7; j++)
-		{
-			double delta = cur_point[j] - prev_point[j];
-			double cur_vel = FX_Fabs(delta) * inv_cycle;
-
-			if (joint_vel_lmt[j] > 0.000001 && cur_vel > joint_vel_lmt[j] + 0.000001)
-			{
-				printf("velocity exceed limit at point %ld joint %ld: cur_vel= %lf, limit= %lf\n", i, j, cur_vel, joint_vel_lmt[j]);
-				return false;
-			}
-
-			if (i >= 2 && joint_acc_lmt[j] > 0.000001)
-			{
-				double cur_acc = FX_Fabs(delta * inv_cycle2 - prev_vel[j] * inv_cycle);
-				if (cur_acc > joint_acc_lmt[j] + 0.000001)
-				{
-					printf("acceleration exceed limit at point %ld joint %ld: cur_acc= %lf, limit= %lf\n", i, j, cur_acc, joint_acc_lmt[j]);
-					return false;
-				}
-			}
-			prev_vel[j] = delta * inv_cycle;
-		}
-	}
-
-	return true;
 }
 
 static double OnMapLiner2ratio(double value)
@@ -2555,11 +2439,12 @@ bool CAxisPln::OnMovL_ZSP(long RobotSerial, double ref_joints[7], double start_p
 		cartesian_traj.OnSetPoint(pose);
 	}
 
-	char op1[] = "D:\\cccc\\SPMOVL\\overlap_midxyzabc.csv";
-	char *path1 = op1;
-	cartesian_traj.OnSaveCSV(path1);
-
 	long final_num = cartesian_traj.OnGetPointNum();
+	if(final_num >= 5000)
+	{
+		printf("Generated more than 5,000 points. Please try reducing the planning distance or increasing VA.");
+		return false;
+	}
 	////////////////////InvKine//////////////
 	FX_InvKineSolvePara sp;
 
@@ -2722,9 +2607,7 @@ bool CAxisPln::OnMovL_ZSP(long RobotSerial, double ref_joints[7], double start_p
 	}
 
 	Overlap_Num = overlap_num;
-	char op[] = "D:\\cccc\\SPMOVL\\overlap_0316.csv";
-	char *path = op;
-	m_output_pset.OnSaveCSV(path);
+
 	return true;
 }
 
@@ -2739,6 +2622,9 @@ bool CAxisPln::OnSendPoints(CPointSet *out)
 		double *p = m_output_pset.OnGetPoint(i);
 		out->OnSetPoint(p);
 	}
+
+	// VA check
+	OnMovCheckVA(out, m_cycle, m_Joint_Acc_Lmt, m_Joint_Vel_Lmt);
 	return true;
 }
 
@@ -2775,6 +2661,11 @@ FX_BOOL CAxisJointPln::OnMovJoint(FX_INT32 RobotSerial, Vect7 start_joint, Vect7
 		sto[i] = end_joint[i];
 	}
 	FX_INT32 num = OnPln(sta, sto, vr, ar);
+	if(num >= 5000)
+	{
+		printf("Generated more than 5,000 points. Please try reducing the planning distance or increasing VA.");
+		return false;
+	}
 	if (num <= 0)
 	{
 		return FX_FALSE;

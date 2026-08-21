@@ -28,15 +28,15 @@
 namespace {
 
 constexpr int kEnableAtCycle = 10;
-constexpr int kWaitAfterEnable = 1000;
-constexpr int kCycleMax = 300000;
-constexpr int64_t kPeriodUsLo = 900;
-constexpr int64_t kPeriodUsHi = 1100;
+constexpr int kWaitAfterEnable = kControlCyclesPerSecond;
+constexpr int kCycleMax = kControlMaxCycles5Min;
+constexpr int64_t kPeriodUsLo = kControlPeriodUsLo;
+constexpr int64_t kPeriodUsHi = kControlPeriodUsHi;
 constexpr double kRefMovedEps = 1e-6;
 constexpr double kM2Mm = 1000.0;
-// 外部输入：test_servo 以该频率调用 ServoPByPico（1kHz 下每 20 周期一帧）
+// 外部输入：test_servo 以该频率调用 ServoPByPico（500Hz 下每 10 周期一帧）
 constexpr int kPicoServoHz = 50;
-constexpr int kPicoServoPeriodCycles = 1000 / kPicoServoHz;
+constexpr int kPicoServoPeriodCycles = kControlHz / kPicoServoHz;
 // 内部插值 kStreamServoCycles（common.hpp，40 周期）由 motion 层处理，与上式无关
 
 std::atomic<bool> g_stop_requested{false};
@@ -399,7 +399,7 @@ int main(int argc, char** argv) {
 
     int go = -1;
     while (go != 0 && go != 1) {
-        std::printf("0=退出  1=进入1kHz循环: ");
+        std::printf("0=退出  1=进入500Hz循环: ");
         if (std::scanf("%d", &go) != 1) {
             return 1;
         }
@@ -432,7 +432,7 @@ int main(int argc, char** argv) {
     session.ReserveRecorder(kCycleMax);
     ctrl.ResetHwRunStats();
 
-    std::printf("\n======== 1kHz loop (GoWork→ServoPByPico→GoHome) ========\n");
+    std::printf("\n======== 500Hz loop (GoWork→ServoPByPico→GoHome) ========\n");
     try {
         while (!AllArmsDone(left_flow, right_flow) && !g_stop_requested) {
             if (cycle == kEnableAtCycle) {
@@ -503,7 +503,7 @@ int main(int argc, char** argv) {
                     out_dir);
     }
     if (period_cnt > 0) {
-        PrintPeriodStats(session.Recorder(), 1000);
+        PrintPeriodStats(session.Recorder(), kControlPeriodUs);
     }
     return (pass || interrupted) ? 0 : 3;
 }

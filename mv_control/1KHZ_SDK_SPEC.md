@@ -19,7 +19,7 @@
 **实机验收命令**（必须通过）：
 
 ```bash
-export LD_LIBRARY_PATH=$TJ_SDK/contrlSDK100343:/opt/ros/humble/lib:$LD_LIBRARY_PATH
+export LD_LIBRARY_PATH=$TJ_SDK/contrlSDK100343:/opt/ros/jazzy/lib:$LD_LIBRARY_PATH
 cmake --build build --target test_enable -j
 ./build/tj_test/test_enable data/test_enable --cpu=2
 # timing.csv: run_us 中位数 < 500；period_us 中位数 950~1050
@@ -53,6 +53,7 @@ flowchart LR
 - 标准写法：`OnClearSet()` → `OnSetJointCmdPos_*()` → **`OnSetSend()`**（非阻塞）
 - **`OnSetSendWaitResponse()`**：阻塞等待 ACK（内部 `sleep(1ms)` 轮询，典型 **~50 ms**），**禁止**用于 1 kHz 环
 - **`SetJointPostionCmd` / 简明 API**（`Connect`/`SetJointMode`/`Disable` 等）：内部常用 `OnSetSendWaitResponse`；**mv_control 已迁移为经典 `SdkClassic` 非阻塞批发送**（见 [CLASSIC_API_MIGRATION.md](./CLASSIC_API_MIGRATION.md)）
+- **Init 速度前馈（默认关闭）**：`kEnableVelEstStep=false` 时不调用 `FX_OnSetVelEstStep`。若改为 `true`，`RealBackend::Open()` 在连接成功后调用 `FX_OnSetVelEstStep(A/B, kVelEstStepMs)`（`kVelEstStepMs = round(kControlDt × 1000)`，当前 1 kHz → `1` ms）；须 `OnClearSet` → 设置 → `OnSetSend`；失败仅 WARN，不阻断 Init
 
 ### 2.2 实机 ~55 ms 根因（已定位）
 
@@ -123,7 +124,7 @@ sequenceDiagram
 
 | 场合 | 允许 API |
 |------|----------|
-| `Init` | `SdkClassic::LinkAndValidate`（`OnLinkTo` + 清错 + 帧校验） |
+| `Init` | `SdkClassic::LinkAndValidate`（`OnLinkTo` + 清错 + 帧校验）；可选 `FX_OnSetVelEstStep`（`kEnableVelEstStep`，默认关） |
 | `SetEnable` / 下使能 | `SdkClassic::SendPositionMode` / `SendDisable`（非阻塞 + Run 轮询） |
 | `SetControlMode` | `SdkClassic::Send*Mode` + `_PollControlModeSync` |
 | `ClearError` | `SdkClassic::ClearArmError` / `ClearServoError`（按臂）、`OnGetServoErr_*` |

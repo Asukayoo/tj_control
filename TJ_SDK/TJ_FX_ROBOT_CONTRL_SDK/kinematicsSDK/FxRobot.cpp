@@ -3,6 +3,7 @@
 #include "stdio.h"
 #include "stdlib.h"
 #include "math.h"
+#include <inttypes.h>
 #include "AxisPln.h"
 #include "LoadIdenPub.h"
 
@@ -52,7 +53,7 @@ FX_BOOL LOADMvCfg(FX_CHAR *path, FX_INT32L TYPE[2], FX_DOUBLE GRV[2][3], FX_DOUB
 
 	for (i = 0; i < 2; i++)
 	{
-		if (fscanf(fp, "%ld,%lf,%lf,%lf,%c", &TYPE[i], &GRV[i][0], &GRV[i][1], &GRV[i][2], &c) != 5)
+		if (fscanf(fp, "%" PRId32 ",%lf,%lf,%lf,%c", &TYPE[i], &GRV[i][0], &GRV[i][1], &GRV[i][2], &c) != 5)
 		{
 			fclose(fp);
 			return FX_FALSE;
@@ -114,7 +115,7 @@ FX_BOOL LOADMvCfg(FX_CHAR *path, FX_INT32L TYPE[2], FX_DOUBLE GRV[2][3], FX_DOUB
 
 	{
 		if (FX_LOG_TAG)
-			printf("TYPE=[%ld %ld]\n", TYPE[0], TYPE[1]);
+			printf("TYPE=[%" PRId32 " %" PRId32 "]\n", TYPE[0], TYPE[1]);
 	}
 	return FX_TRUE;
 }
@@ -274,7 +275,7 @@ FX_BOOL FX_Init_Robot_Kine_Pilot_SRS(FX_INT32L RobotSerial, FX_DOUBLE DH[8][4])
 	SPC->Angt = 180.0 - SPC->Ang1 - SPC->Ang2;
 	SPC->m_J4_Bound = -SPC->Ang1;
 
-	SPC->cart_len = FX_Sqrt(SPC->L1 * SPC->L1 + SPC->L2 * SPC->L2);
+	SPC->cart_len = SPC->L1 + SPC->L2;
 
 	if (FX_LOG_TAG)
 		printf("EG:DH[0]=[%lf %lf %lf %lf]\n", DH[0][0], DH[0][1], DH[0][2], DH[0][3]);
@@ -2949,6 +2950,7 @@ FX_BOOL FX_InvKine_Pilot_CCS(FX_INT32L RobotSerial, FX_InvKineSolvePara *solve_p
 		if (solve_para->m_Output_RetJoint[i] < solve_para->m_Output_RunLmtN[i])
 		{
 			solve_para->m_Output_IsJntExd = FX_TRUE;
+			solve_para->m_Output_JntExdTags[i] = FX_TRUE;
 
 			exdabs = FX_Fabs(solve_para->m_Output_RetJoint[i] - solve_para->m_Output_RunLmtN[i]);
 			if (solve_para->m_Output_JntExdABS < exdabs)
@@ -3667,6 +3669,8 @@ FX_BOOL FX_Robot_PLN_MOVLA(FX_INT32L RobotSerial, Vect6 Start_XYZABC, Vect6 End_
 	FX_DOUBLE jerk = ACC * 10;
 
 	CAxisPln Spln;
+	FX_Robot *pRobot = (FX_Robot *)&m_Robot[RobotSerial];
+	Spln.OnSetPNVA(pRobot->m_Lmt.m_JLmtPos_P, pRobot->m_Lmt.m_JLmtPos_N, pRobot->m_Lmt.m_JLmtVel, pRobot->m_Lmt.m_JLmtAcc);
 	Spln.OnSetFreq(Freq);
 	FX_BOOL result = Spln.OnMovL(RobotSerial, refJ, start_pos, end_pos, Vel, ACC, jerk, ret_pset);
 
@@ -3745,6 +3749,8 @@ FX_BOOL FX_Robot_PLN_MOVL_KeepJA(FX_INT32L RobotSerial, Vect7 startjoints, Vect7
 	}
 
 	CAxisPln Spln;
+	FX_Robot *pRobot = (FX_Robot *)&m_Robot[RobotSerial];
+	Spln.OnSetPNVA(pRobot->m_Lmt.m_JLmtPos_P, pRobot->m_Lmt.m_JLmtPos_N, pRobot->m_Lmt.m_JLmtVel, pRobot->m_Lmt.m_JLmtAcc);
 	Spln.OnSetFreq(Freq);
 	FX_BOOL result = Spln.OnMovL_KeepJ_CutA(RobotSerial, start_pos, end_pos, vel, acc, ret_pset);
 
@@ -3822,6 +3828,8 @@ FX_BOOL FX_Robot_PLN_Set_MOVL_Start(FX_INT32L RobotSerial, Vect7 Ref_Joints, Vec
 	FX_DOUBLE jerk = Acc * 10;
 
 	// CAxisPln Spln;
+	FX_Robot *pRobot = (FX_Robot *)&m_Robot[RobotSerial];
+	m_AxisPln.OnSetPNVA(pRobot->m_Lmt.m_JLmtPos_P, pRobot->m_Lmt.m_JLmtPos_N, pRobot->m_Lmt.m_JLmtVel, pRobot->m_Lmt.m_JLmtAcc);
 	m_AxisPln.OnInit_MOVL_ZSP();
 	m_AxisPln.OnSetFreq(Freq);
 	FX_BOOL result = m_AxisPln.OnMovL_ZSP(RobotSerial, refJ, start_pos, end_pos, Vel, Acc, jerk, ZSP_Type, ZSP_Para, Allow_Range, FX_MOVL_START);
@@ -3882,6 +3890,44 @@ FX_BOOL FX_Robot_PLN_Get_MOVL_Path(FX_INT32L RobotSerial, CPointSet *ret_Pset)
 
 	return FX_TRUE;
 }
+
+FX_BOOL FX_Robot_PLN_MOVJ(FX_INT32L RobotSerial, Vect7 Start_Joints, Vect7 End_Joints, FX_DOUBLE Vel_ratio, FX_DOUBLE ACC_ratio, FX_INT32L Freq, CPointSet* ret_pset)
+{
+	if (FX_LOG_TAG)
+		FX_LOG_INFO("[FxRobot - FX_Robot_PLN_MOVJ]\n");
+
+	Vect7 start_pos = {0};
+	Vect7 end_pos = {0};
+	FX_INT32L i = 0;
+	FX_DOUBLE vr = Vel_ratio * 0.01;
+	FX_DOUBLE ar = ACC_ratio * 0.01;
+
+	for (i = 0; i < 7; i++)
+	{
+		start_pos[i] = Start_Joints[i];
+		end_pos[i] = End_Joints[i];
+	}
+
+	CAxisJointPln Spln;
+	FX_Robot *pRobot = (FX_Robot *)&m_Robot[RobotSerial];
+	Spln.OnSetLmt(7,pRobot->m_Lmt.m_JLmtPos_N, pRobot->m_Lmt.m_JLmtPos_P, pRobot->m_Lmt.m_JLmtVel, pRobot->m_Lmt.m_JLmtAcc);
+	Spln.OnSetFreq(Freq);
+	FX_BOOL result = Spln.OnMovJoint(RobotSerial, start_pos, end_pos, vr, ar, ret_pset);
+
+	if (result != FX_FALSE)
+	{
+		return FX_TRUE;
+	}
+	else
+	{
+		if (FX_LOG_TAG)
+			FX_LOG_INFO("FX_Robot_PLN_MOVJ: Joint Over Limit or Over Reachable Space. Check Parameters.\n");
+		return FX_FALSE;
+	}
+
+	return FX_FALSE;
+}
+
 /////Joint Torque to EE Torque Mapping
 FX_BOOL FX_Robot_Solve66_GaussJordan(const Matrix6 A, const Vect6 b, Vect6 x)
 {

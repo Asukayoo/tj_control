@@ -430,6 +430,17 @@ bool ExportTeleopDiagReport(const PicoRecorder& pico, const char* dir) {
     double rx_min = 0.0;
     double rx_max = 0.0;
     bool rx_init = false;
+    uint64_t seq_gap_cnt = 0;
+    uint64_t ts_spike_cnt = 0;
+    uint64_t ts_frozen_spike_cnt = 0;
+    uint64_t ts_sample_cnt = 0;
+    double ts_delta_sum_ms = 0.0;
+    double ts_delta_max_ms = 0.0;
+    uint64_t prev_valid_seq = 0;
+    uint64_t prev_valid_ts = 0;
+    double prev_valid_rx = 0.0;
+    bool have_prev_valid = false;
+    constexpr double kTsSpikeMs = 50.0;
 
     for (std::size_t i = 0; i < pico.Size(); ++i) {
         const PicoSample& s = pico[i];
@@ -444,6 +455,32 @@ bool ExportTeleopDiagReport(const PicoRecorder& pico, const char* dir) {
             first_valid_cycle = s.cycle;
             seen_valid = true;
         }
+        if (have_prev_valid) {
+            if (s.seq > prev_valid_seq + 1) {
+                ++seq_gap_cnt;
+            }
+            if (s.timestamp_ns >= prev_valid_ts) {
+                const double dts_ms =
+                    static_cast<double>(s.timestamp_ns - prev_valid_ts) / 1e6;
+                if (dts_ms <= 5000.0) {
+                    ++ts_sample_cnt;
+                    ts_delta_sum_ms += dts_ms;
+                    if (dts_ms > ts_delta_max_ms) {
+                        ts_delta_max_ms = dts_ms;
+                    }
+                    if (dts_ms > kTsSpikeMs) {
+                        ++ts_spike_cnt;
+                        if (std::abs(s.right_pose[0] - prev_valid_rx) < 1e-4) {
+                            ++ts_frozen_spike_cnt;
+                        }
+                    }
+                }
+            }
+        }
+        prev_valid_seq = s.seq;
+        prev_valid_ts = s.timestamp_ns;
+        prev_valid_rx = s.right_pose[0];
+        have_prev_valid = true;
         if (PoseHasNan(s.right_pose) || PoseHasNan(s.left_pose)) {
             ++nan_pose_cnt;
         }
@@ -472,6 +509,14 @@ bool ExportTeleopDiagReport(const PicoRecorder& pico, const char* dir) {
     if (rx_init) {
         std::fprintf(f, "right_x_span_m=%.6f\n", rx_max - rx_min);
     }
+    if (ts_sample_cnt > 0) {
+        std::fprintf(f, "pico_ts_delta_mean_ms=%.2f pico_ts_delta_max_ms=%.2f\n",
+                     ts_delta_sum_ms / static_cast<double>(ts_sample_cnt), ts_delta_max_ms);
+        std::fprintf(f, "pico_ts_spike_gt50ms=%llu frozen_during_spike=%llu\n",
+                     static_cast<unsigned long long>(ts_spike_cnt),
+                     static_cast<unsigned long long>(ts_frozen_spike_cnt));
+    }
+    std::fprintf(f, "udp_seq_gap=%llu\n", static_cast<unsigned long long>(seq_gap_cnt));
 
     std::fprintf(f, "\n结论:\n");
     if (valid_cnt == 0) {
@@ -490,6 +535,23 @@ bool ExportTeleopDiagReport(const PicoRecorder& pico, const char* dir) {
     } else if (rx_init && (rx_max - rx_min) > 1e-4) {
         std::fprintf(f,
                      "- 位姿有变化且无数值异常：Pico 发布与 C++ 订阅正常；若仿真不动请查 servo_pico_trace。\n");
+        if (seq_gap_cnt == 0) {
+            std::fprintf(f,
+                         "- UDP seq 连续：本地发布→接收无明显丢包（卡顿多半不在 socket 延时）。\n");
+        } else {
+            std::fprintf(f,
+                         "- UDP seq 缺口 %llu：查 500Hz poll 或发布进程调度。\n",
+                         static_cast<unsigned long long>(seq_gap_cnt));
+        }
+        if (ts_spike_cnt > 0) {
+            std::fprintf(f,
+                         "- Pico 设备 timestamp 尖峰(>50ms) %llu 次，其中位姿冻结 %llu 次"
+                         " → 优先查 PC Service/头显无线。\n",
+                         static_cast<unsigned long long>(ts_spike_cnt),
+                         static_cast<unsigned long long>(ts_frozen_spike_cnt));
+            std::fprintf(f,
+                         "- 可运行: python3 -m python.teleop.pico_latency_diag --sdk --seconds 15\n");
+        }
     } else {
         std::fprintf(f,
                      "- 有 valid 帧但位姿几乎不变：手柄未动或发布侧未更新 SDK 数据。\n");

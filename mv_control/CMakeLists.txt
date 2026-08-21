@@ -35,7 +35,7 @@ find_library(MARVIN_SDK MarvinSDK
 )
 
 # KDL + kdl_parser（URDF 运动学）
-list(APPEND CMAKE_PREFIX_PATH "/opt/ros/humble")
+list(APPEND CMAKE_PREFIX_PATH "/opt/ros/jazzy")
 find_package(orocos_kdl REQUIRED)
 find_package(kdl_parser REQUIRED)
 
@@ -89,5 +89,8 @@ endif()
 
 target_compile_definitions(mv_control PUBLIC
     MV_CONTROL_CONFIG_DEFAULT="${CMAKE_SOURCE_DIR}/mv_control/config/config.yaml")
-target_compile_definitions(mv_control PRIVATE CMPL_LIN EIGEN_MAX_STATIC_ALIGN_BYTES=0)
+# Must be PUBLIC: headers expose Eigen-fixed types (V6d/ImpConfig/MvConfig). PRIVATE-only
+# caused ODR (test TU sizeof MvConfig=1120 vs lib=1112) → 8-byte heap overrun in ctor.
+target_compile_definitions(mv_control PUBLIC EIGEN_MAX_STATIC_ALIGN_BYTES=0)
+target_compile_definitions(mv_control PRIVATE CMPL_LIN)
 message(STATUS "mv_control: runtime SIM/HW via Init(is_sim)")

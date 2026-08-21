@@ -22,10 +22,10 @@
 namespace {
 
 constexpr int kEnableAtCycle = 10;
-constexpr int kWaitAfterEnable = 1000;
-constexpr int kCycleMax = 300000;
-constexpr int64_t kPeriodUsLo = 900;
-constexpr int64_t kPeriodUsHi = 1100;
+constexpr int kWaitAfterEnable = kControlCyclesPerSecond;
+constexpr int kCycleMax = kControlMaxCycles5Min;
+constexpr int64_t kPeriodUsLo = kControlPeriodUsLo;
+constexpr int64_t kPeriodUsHi = kControlPeriodUsHi;
 constexpr double kRefMovedEps = 1e-6;
 
 std::atomic<bool> g_stop_requested{false};
@@ -206,7 +206,7 @@ int main(int argc, char** argv) {
 
     int go = -1;
     while (go != 0 && go != 1) {
-        std::printf("0=退出  1=进入1kHz循环: ");
+        std::printf("0=退出  1=进入500Hz循环: ");
         if (std::scanf("%d", &go) != 1) {
             return 1;
         }
@@ -230,7 +230,7 @@ int main(int argc, char** argv) {
     session.ReserveRecorder(kCycleMax);
     ctrl.ResetHwRunStats();
 
-    std::printf("\n======== 1kHz loop (使能→MovJ work/home→下使能) ========\n");
+    std::printf("\n======== 500Hz loop (使能→MovJ work/home→下使能) ========\n");
     try {
         while (!AllArmsDone(left_flow, right_flow) && !g_stop_requested) {
             if (cycle == kEnableAtCycle) {
@@ -287,7 +287,7 @@ int main(int argc, char** argv) {
         std::printf("\n[%s] cycles=%d  saved → %s\n", pass ? "PASS" : "FAIL", cycle,
                     out_dir);
     }
-    SavePeriodDiagFromRecorder(out_dir, session.Recorder(), 1000, kPeriodUsLo,
-                               kPeriodUsHi);
+    SavePeriodDiagFromRecorder(out_dir, session.Recorder(), kControlPeriodUs,
+                               kPeriodUsLo, kPeriodUsHi);
     return (pass || interrupted) ? 0 : 3;
 }

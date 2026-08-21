@@ -1,7 +1,9 @@
 servo_hz=50
 record_hz=50
-joint_udp_hz=1000
+joint_udp_hz=500
+model=615
+urdf=/home/yxc/tj_control/urdf/Marvin_M3S_CCS_615_urdf/urdf/Marvin_M3-S-CCS-615-V2.0_Base_and_Stand_Asm.urdf
 pico_udp_port=30101
 joint_udp_port=30100
-robot_samples=11519
-pico_samples=11519
+robot_samples=10893
+pico_samples=10893
